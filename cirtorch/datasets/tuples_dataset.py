@@ -236,8 +236,7 @@ class TuplesDataset(data.Dataset):
             query_tf = ISSTransform(shortest_size=data_config.getint("train_shortest_size"),
                                     longest_max_size=data_config.getint("train_longest_max_size"),
                                     rgb_mean=data_config.getstruct("rgb_mean"),
-                                    rgb_std=data_config.getstruct("rgb_std"),
-                                    random_flip=data_config.getboolean("random_flip"))
+                                    rgb_std=data_config.getstruct("rgb_std"))
 
             query_data = ISSDataset(root_dir='',
                                     name="query",
@@ -280,8 +279,7 @@ class TuplesDataset(data.Dataset):
             pool_tf = ISSTransform(shortest_size=data_config.getint("train_shortest_size"),
                                    longest_max_size=data_config.getint("train_longest_max_size"),
                                    rgb_mean=data_config.getstruct("rgb_mean"),
-                                   rgb_std=data_config.getstruct("rgb_std"),
-                                   random_flip=data_config.getboolean("random_flip"))
+                                   rgb_std=data_config.getstruct("rgb_std"))
 
             pool_data = ISSDataset(root_dir='',
                                    name="negative_pool",

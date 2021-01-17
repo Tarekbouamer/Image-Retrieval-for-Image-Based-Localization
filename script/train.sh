@@ -16,5 +16,3 @@ python3 -m torch.distributed.launch --nproc_per_node=$N_GPUS ./cirtorch/examples
       --directory $EXPERIMENT \
       --data $DATA_DIR \
       --local_rank 0 \
-      --resume $Resume \
-

@@ -67,7 +67,7 @@ class TuplesTransform:
         if self.random_scale is not None:
             target_size = self._random_target_size()
         else:
-            target_size = self.longest_max_size
+            target_size = self.shortest_size
 
         scale = self._adjusted_scale(img.size[0], img.size[1], target_size)
 
@@ -76,7 +76,7 @@ class TuplesTransform:
 
         # Image transformations
         img = tfn.to_tensor(img)
-        img = self._normalize_image(img)
+        #img = self._normalize_image(img)
 
         return dict(img=img)
 

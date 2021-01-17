@@ -27,7 +27,9 @@ from cirtorch.datasets.tuples_dataset import TuplesDataset, NETWORK_INPUTS
 from cirtorch.datasets.tuples_transform import TuplesTransform
 from cirtorch.datasets.tuples_sampler import TuplesDistributedARBatchSampler
 from cirtorch.datasets.generic import ISSDataset, ISSTransform, ParisOxfordTestDataset, DistributedARBatchSampler, INPUTS
+from cirtorch.datasets.augmentation import RandomAugmentation
 from cirtorch.datasets.misc import iss_collate_fn
+
 
 # modules
 from cirtorch.modules.fpn import FPN, FPNBody
@@ -172,7 +174,8 @@ def make_dataloader(args, config, rank=None, world_size=None):
                                longest_max_size=data_config.getint("train_longest_max_size"),
                                rgb_mean=data_config.getstruct("rgb_mean"),
                                rgb_std=data_config.getstruct("rgb_std"),
-                               random_flip=data_config.getboolean("random_flip"))
+                               random_flip=data_config.getboolean("random_flip"),
+                               random_scale=data_config.getstruct("random_scale"))
 
     # Training dataloader
     train_db = TuplesDataset(root_dir=args.data,
@@ -203,7 +206,8 @@ def make_dataloader(args, config, rank=None, world_size=None):
                              longest_max_size=data_config.getint("train_longest_max_size"),
                              rgb_mean=data_config.getstruct("rgb_mean"),
                              rgb_std=data_config.getstruct("rgb_std"),
-                             random_flip=data_config.getboolean("random_flip"))
+                             random_flip=data_config.getboolean("random_flip"),
+                             random_scale=data_config.getstruct("random_scale"))
 
     val_db = TuplesDataset(root_dir=args.data,
                            name=data_config.get("training_dataset"),
@@ -337,11 +341,17 @@ def make_model(args, config):
     ret_head = ImageRetrievalHead(pooling=ir_config.getstruct("pooling"),
                                   normal=ir_config.getstruct("normal"),
                                   dim=output_dim)
+    # Data augmentation
+
+    augment = RandomAugmentation(rgb_mean=data_config.getstruct("rgb_mean"),
+                                 rgb_std=data_config.getstruct("rgb_std")
+                                 )
 
     # Create a generic image retrieval network
     net = ImageRetrievalNet(body,
                             ret_algo,
-                            ret_head)
+                            ret_head,
+                            augment=augment)
 
     return net, net_modules, output_dim
 
@@ -467,7 +477,7 @@ def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
         batch_time = time.time()
 
         # Run network
-        losses, _ = model(**batch, do_loss=True)
+        losses, _ = model(**batch, do_loss=True, do_augmentaton=True)
         distributed.barrier()
 
         losses = OrderedDict((k, v.mean()) for k, v in losses.items())

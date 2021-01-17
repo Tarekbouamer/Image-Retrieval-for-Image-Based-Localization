@@ -9,8 +9,9 @@ from cirtorch.utils.parallel import PackedSequence
 
 class ImageRetrievalNet(nn.Module):
     
-    def __init__(self, body, ret_algo, ret_head):
+    def __init__(self, body, ret_algo, ret_head, augment=None):
         super(ImageRetrievalNet, self).__init__()
+        self.augment = augment
         self.body = body
 
         self.ret_algo = ret_algo
@@ -59,7 +60,7 @@ class ImageRetrievalNet(nn.Module):
 
         return img, lbl
 
-    def forward(self, img=None, positive_img=None, negative_img=None, scales=[1], do_loss=False, do_prediction=True, **varargs):
+    def forward(self, img=None, positive_img=None, negative_img=None, scales=[1], do_augmentaton=False, do_loss=False, do_prediction=True, **varargs):
 
         # Convert ground truth to the internal format
         if do_loss:
@@ -89,6 +90,10 @@ class ImageRetrievalNet(nn.Module):
                 ("ret_pred", pred)
             ])
             return _, pred
+
+        # Perform augmentation if true and exists
+        if do_augmentaton and self.augment:
+            img = self.augment(img)
 
         # Pad the input images
         img, valid_size = pad_packed_images(img)

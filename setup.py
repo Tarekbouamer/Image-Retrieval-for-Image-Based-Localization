@@ -38,6 +38,7 @@ setup(
         "cirtorch.configuration",
         "cirtorch.datasets",
         "cirtorch.datasets.generic",
+        "cirtorch.datasets.augmentation",
         "cirtorch.examples",
         "cirtorch.layers",
         "cirtorch.models",
