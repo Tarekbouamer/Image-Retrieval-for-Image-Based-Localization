@@ -1,8 +1,6 @@
 ## Image-Retrieval-for-Image-Based-Localization
 
 ### TO DO?
-* Add ABN Inplace, optimizer, scheduler, snapshot.
-* Transformer + FPN-SE.
 * Add results on roxford5k rparis6k.
 
 ### Prerequisites
