@@ -135,7 +135,6 @@ def make_dir(config, directory):
 
     directory = path.join(directory, extension)
 
-    # TODO Add SE Transformer and FPN
 
     if not path.exists(directory):
         log_debug("Create experiment path  from %s", directory)
@@ -763,24 +762,24 @@ def main(args):
     rank, world_size = distributed.get_rank(), distributed.get_world_size()
     torch.cuda.set_device(device_id)
 
+    # Load configuration
+    config = make_config(args)
+
+    # Experiment Path
+    exp_dir = make_dir(config, args.directory)
+
     # Initialize logging
     if rank == 0:
-        logging.init(args.directory, "training")
+        logging.init(exp_dir, "training")
         summary = tensorboard.SummaryWriter(args.directory)
     else:
         summary = None
-
-    # Load configuration
-    config = make_config(args)
 
     body_config = config["body"]
     optimizer_config = config["optimizer"]
 
     # Load data
     train_dataloader, val_dataloader = make_dataloader(args, config, rank, world_size)
-
-    # Experiment Path
-    experiment_dir = make_dir(config, args.directory)
 
     # Initialize model
     if body_config.getboolean("pretrained"):
@@ -874,7 +873,7 @@ def main(args):
 
         # Save snapshot (only on rank 0)
         if rank == 0:
-            snapshot_file = path.join(experiment_dir, "model_last.pth.tar")
+            snapshot_file = path.join(exp_dir, "model_{}.pth.tar".format(epoch))
 
             log_debug("Saving snapshot to %s", snapshot_file)
 
@@ -921,7 +920,7 @@ def main(args):
             if score['test'] > best_score['test']:
                 best_score = score
                 if rank == 0:
-                    shutil.copy(snapshot_file, path.join(experiment_dir, "test_model_best.pth.tar"))
+                    shutil.copy(snapshot_file, path.join(exp_dir, "test_model_best.pth.tar"))
 
 
 if __name__ == '__main__':

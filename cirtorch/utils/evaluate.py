@@ -161,14 +161,6 @@ def compute_map_and_print(dataset, ranks, gnd, log_info, kappas=[1, 5, 10]):
 
         mapH, apsH, mprH, prsH = compute_map(ranks, gnd_t, kappas)
 
-        print('>> {}: mAP E: {}, M: {}, H: {}'.format(dataset, np.around(mapE * 100, decimals=2),
-                                                      np.around(mapM * 100, decimals=2),
-                                                      np.around(mapH * 100, decimals=2)))
-        print('>> {}: mP@k{} E: {}, M: {}, H: {}'.format(dataset, kappas, np.around(mprE * 100, decimals=2),
-                                                         np.around(mprM * 100, decimals=2),
-                                                         np.around(mprH * 100, decimals=2)))
-
-
         log_info("{%s}: mAP E: {%f}, M: {%f}, H: {%f}",
                  dataset,
                  np.around(mapE*100, decimals=2),
@@ -197,7 +189,7 @@ def compute_map_and_print(dataset, ranks, gnd, log_info, kappas=[1, 5, 10]):
                  np.around(mprH * 100, decimals=2)[2])
 
         score = {
-            "mAP": 100 * (mapE + mapM + mapH)/3.0
+            "mAP": 100 * (mapM + mapH)/2.0
         }
 
     return score
