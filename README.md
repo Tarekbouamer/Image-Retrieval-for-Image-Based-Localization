@@ -26,3 +26,9 @@ git clone https://github.com/Tarekbouamer/Image-Retrieval-for-Image-Based-Locali
 cd Image-Retrieval-for-Image-Based-Localization
 python setup.py install
 ```
+### Results
+
+  | Models       |        | Oxford |        |        | Paris  |        | Download |
+  |:------------:|:------:|:------:|:------:|:------:|:------:|:------:|:---------|
+  |   mAP        | Easy   | Medium | Hard   | Easy   | Medium | Hard   |          |
+  | ResNet50-GeM | 66.20  | 51.78  | 28.76  | 79.28  | 62.35  | 36.66  |[resnet50](https://drive.google.com/file/d/1mZpzcAHLFkeKLKROC4ljT7kuy0AUh6WV/view?usp=sharing)|
