@@ -27,6 +27,8 @@ cd Image-Retrieval-for-Image-Based-Localization
 python setup.py install
 ```
 ### Results
+Table: Large-scale image retrieval results of our models on Revisited Oxford and Paris datasets. 
+We evaluate against the Easy, Medium and Hard with the mAP metric.
 
   | Models       |        | Oxford |        |        | Paris  |        | Download |
   |:------------:|:------:|:------:|:------:|:------:|:------:|:------:|:---------|
