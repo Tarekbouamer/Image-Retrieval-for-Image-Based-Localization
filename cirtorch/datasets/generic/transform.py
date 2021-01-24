@@ -11,20 +11,15 @@ class ISSTransform:
     def __init__(self,
                  shortest_size=None,
                  longest_max_size=None,
-                 rgb_mean=None,
-                 rgb_std=None,
                  random_flip=False,
-                 random_scale=None,
-                 multi_scales=None):
+                 random_scale=None):
 
         self.shortest_size = shortest_size
 
         self.longest_max_size = longest_max_size
-        self.rgb_mean = rgb_mean
-        self.rgb_std = rgb_std
+
         self.random_flip = random_flip
         self.random_scale = random_scale
-        self.multi_scales = multi_scales
 
     def _adjusted_scale(self, in_width, in_height, target_size):
         min_size = min(in_width, in_height)
@@ -56,13 +51,6 @@ class ISSTransform:
 
         return int(target_size)
 
-    def _normalize_image(self, img):
-        if self.rgb_mean is not None:
-            img.sub_(img.new(self.rgb_mean).view(-1, 1, 1))
-        if self.rgb_std is not None:
-            img.div_(img.new(self.rgb_std).view(-1, 1, 1))
-        return img
-
     def __call__(self, img, bbx=None):
 
         # Crop  bbx
@@ -86,7 +74,6 @@ class ISSTransform:
 
         # Image transformations
         img = tfn.to_tensor(img)
-        img = self._normalize_image(img)
 
         return dict(img=img)
 
@@ -95,52 +82,49 @@ class ISSTestTransform:
     def __init__(self,
                  shortest_size=None,
                  longest_max_size=None,
-                 rgb_mean=None,
-                 rgb_std=None):
+                 random_scale=None):
 
         self.shortest_size = shortest_size
         self.longest_max_size = longest_max_size
+        self.random_scale = random_scale
 
-        self.rgb_mean = rgb_mean
-        self.rgb_std = rgb_std
+    # def _adjusted_scale(self, in_width, in_height):
+    #    min_size = min(in_width, in_height)
+    #    scale = self.shortest_size / min_size
+    #    return scale
 
     def _adjusted_scale(self, in_width, in_height):
         min_size = min(in_width, in_height)
-        scale = self.shortest_size / min_size
-        return scale
-
-    def _adjusted_scale(self, in_width, in_height, target_size):
-        min_size = min(in_width, in_height)
         max_size = max(in_width, in_height)
-        scale = target_size / min_size
 
+        window = self.shortest_size * self.random_scale
+        scale = 1.0
+
+        # resize to mean size if out of window
+        if int(min_size) > window[1] or int(min_size) < window[0]:
+            scale = self.shortest_size / min_size
+
+        # resize to max if longer
         if int(max_size * scale) > self.longest_max_size:
             scale = self.longest_max_size / max_size
 
         return scale
 
-    def _normalize_image(self, img):
-        if self.rgb_mean is not None:
-            img.sub_(img.new(self.rgb_mean).view(-1, 1, 1))
-        if self.rgb_std is not None:
-            img.div_(img.new(self.rgb_std).view(-1, 1, 1))
-        return img
+    def __call__(self, img, bbx=None):
 
-    def __call__(self, img):
+        # Crop  bbx
+        if bbx is not None:
+            #full_size = max(img.size[0], img.size[1])
+            img = img.crop(box=bbx)
 
-        # Adjust scale, possibly at random
-        if self.random_scale is not None:
-            target_size = self._random_target_size()
-        else:
-            target_size = self.shortest_size
+        if self.shortest_size:
 
-        scale = self._adjusted_scale(img.size[0], img.size[1], target_size)
+            scale = self._adjusted_scale(img.size[0], img.size[1])
 
-        out_size = tuple(int(dim * scale) for dim in img.size)
-        img = img.resize(out_size, resample=Image.BILINEAR)
+            out_size = tuple(int(dim * scale) for dim in img.size)
+            img = img.resize(out_size, resample=Image.BILINEAR)
 
         # Image transformations
         img = tfn.to_tensor(img)
-        img = self._normalize_image(img)
 
-        return img
+        return dict(img=img)

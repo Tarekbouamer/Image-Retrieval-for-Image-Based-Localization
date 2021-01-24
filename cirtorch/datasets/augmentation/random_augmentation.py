@@ -111,24 +111,27 @@ class RandomAugmentation(nn.Module):
 
         return x * msk
 
-    def forward(self, x, masking=True):
+    def forward(self, x, masking=True, do_augmentation=False):
         # Unpack inputs
         x, valid_size = self._unpack_input(x)
 
         # translate pure image to center
         x, bbx = centralize(x, valid_size)
 
-        # normalize min_max !better photometric augmentation control
-        x, x_min, x_max = normalize_min_max(x)
+        if do_augmentation:
 
-        # run augmentation
-        x = self.geometric(x)
-        x = self.photometric(x)
-        x = self.filter(x)
+            # normalize min_max !better photometric augmentation control
+            x, x_min, x_max = normalize_min_max(x)
 
-        # denormalize min_max
-        x = denormalize_min_max(x, x_max=x_max, x_min=x_min)
+            # run augmentation
+            x = self.geometric(x)
+            x = self.photometric(x)
+            x = self.filter(x)
 
+            # denormalize min_max
+            x = denormalize_min_max(x, x_max=x_max, x_min=x_min)
+
+        # Zeros out of image bbx
         x = self._msk(x, bbx)
 
         # normalize based on mean and std

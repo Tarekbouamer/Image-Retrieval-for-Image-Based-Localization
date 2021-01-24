@@ -26,7 +26,7 @@ from cirtorch.backbones.util import load_state_dict_from_url, init_weights
 from cirtorch.datasets.tuples_dataset import TuplesDataset, NETWORK_INPUTS
 from cirtorch.datasets.tuples_transform import TuplesTransform
 from cirtorch.datasets.tuples_sampler import TuplesDistributedARBatchSampler
-from cirtorch.datasets.generic import ISSDataset, ISSTransform, ParisOxfordTestDataset, DistributedARBatchSampler, INPUTS
+from cirtorch.datasets.generic import ISSDataset, ISSTestTransform, ParisOxfordTestDataset, DistributedARBatchSampler, INPUTS
 from cirtorch.datasets.augmentation import RandomAugmentation
 from cirtorch.datasets.misc import iss_collate_fn
 
@@ -638,10 +638,9 @@ def test(args, config, model, rank=None, world_size=None, **varargs):
             # Prepare query loader
             log_debug('{%s}: Extracting descriptors for query images', dataset)
 
-            query_tf = ISSTransform(shortest_size=data_config.getint("test_shortest_size"),
-                                    longest_max_size=data_config.getint("test_longest_max_size"),
-                                    rgb_mean=data_config.getstruct("rgb_mean"),
-                                    rgb_std=data_config.getstruct("rgb_std"))
+            query_tf = ISSTestTransform(shortest_size=data_config.getint("test_shortest_size"),
+                                        longest_max_size=data_config.getint("test_longest_max_size"),
+                                        random_scale=data_config.getstruct("random_scale"))
 
             query_data = ISSDataset(root_dir='',
                                     name="query",
@@ -671,7 +670,7 @@ def test(args, config, model, rank=None, world_size=None, **varargs):
                 # Upload batch
                 batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in INPUTS}
 
-                _, pred = model(**batch, scales=scales, do_prediction=True)
+                _, pred = model(**batch, scales=scales, do_prediction=True, do_augmentaton=False)
 
                 distributed.barrier()
 
@@ -682,10 +681,9 @@ def test(args, config, model, rank=None, world_size=None, **varargs):
             # Prepare negative database data loader
             log_debug('{%s}: Extracting descriptors for database images', dataset)
 
-            database_tf = ISSTransform(shortest_size=data_config.getint("test_shortest_size"),
-                                       longest_max_size=data_config.getint("test_longest_max_size"),
-                                       rgb_mean=data_config.getstruct("rgb_mean"),
-                                       rgb_std=data_config.getstruct("rgb_std"))
+            database_tf = ISSTestTransform(shortest_size=data_config.getint("test_shortest_size"),
+                                           longest_max_size=data_config.getint("test_longest_max_size"),
+                                           random_scale=data_config.getstruct("random_scale"))
 
             database_data = ISSDataset(root_dir='',
                                        name="database",
@@ -711,9 +709,10 @@ def test(args, config, model, rank=None, world_size=None, **varargs):
 
             for it, batch in tqdm(enumerate(database_dl), total=len(database_dl)):
                 # Upload batch
+
                 batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in INPUTS}
 
-                _, pred = model(**batch, scales=scales, do_prediction=True)
+                _, pred = model(**batch, scales=scales, do_prediction=True, do_augmentaton=False)
 
                 distributed.barrier()
 
@@ -770,7 +769,7 @@ def main(args):
 
     # Initialize logging
     if rank == 0:
-        logging.init(exp_dir, "training")
+        logging.init(exp_dir, "training" if not args.eval else "eval")
         summary = tensorboard.SummaryWriter(args.directory)
     else:
         summary = None

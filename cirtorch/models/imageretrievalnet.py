@@ -92,12 +92,13 @@ class ImageRetrievalNet(nn.Module):
             return _, pred
 
         # Perform augmentation if true and exists
-        if do_augmentaton and self.augment:
-            img = self.augment(img)
+        if self.augment:
+            img = self.augment(img, masking=True, do_augmentation=do_augmentaton)
 
         # Pad the input images
         img, valid_size = pad_packed_images(img)
         img_size = img.shape[-2:]
+        #print(img_size)
 
         # Run network body
         x = self.body(img)

@@ -51,13 +51,6 @@ class TuplesTransform:
             target_size = random.choice(target_sizes)
         return int(target_size)
 
-    def _normalize_image(self, img):
-        if self.rgb_mean is not None:
-            img.sub_(img.new(self.rgb_mean).view(-1, 1, 1))
-        if self.rgb_std is not None:
-            img.div_(img.new(self.rgb_std).view(-1, 1, 1))
-        return img
-
     def __call__(self, img):
         # Random flip
         if self.random_flip:
@@ -76,53 +69,5 @@ class TuplesTransform:
 
         # Image transformations
         img = tfn.to_tensor(img)
-        #img = self._normalize_image(img)
 
         return dict(img=img)
-
-
-class ISSTestTransform:
-    """Transformer function for instance segmentation, test time
-
-    Parameters
-    ----------
-    shortest_size : int
-        Outputs size of the shortest image dimension.
-    rgb_mean : tuple of float or None
-        Per-channel mean values to use when normalizing the images, or None to disable mean normalization
-    rgb_std : tuple of float or None
-        Per-channel std values to use when normalizing the images, or None to disable std normalization
-    """
-
-    def __init__(self,
-                 shortest_size,
-                 rgb_mean=None,
-                 rgb_std=None):
-        self.shortest_size = shortest_size
-        self.rgb_mean = rgb_mean
-        self.rgb_std = rgb_std
-
-    def _adjusted_scale(self, in_width, in_height):
-        min_size = min(in_width, in_height)
-        scale = self.shortest_size / min_size
-        return scale
-
-    def _normalize_image(self, img):
-        if self.rgb_mean is not None:
-            img.sub_(img.new(self.rgb_mean).view(-1, 1, 1))
-        if self.rgb_std is not None:
-            img.div_(img.new(self.rgb_std).view(-1, 1, 1))
-        return img
-
-    def __call__(self, img):
-        # Adjust scale
-        scale = self._adjusted_scale(img.size[0], img.size[1])
-
-        out_size = tuple(int(dim * scale) for dim in img.size)
-        img = img.resize(out_size, resample=Image.BILINEAR)
-
-        # Image transformations
-        img = tfn.to_tensor(img)
-        img = self._normalize_image(img)
-
-        return img
