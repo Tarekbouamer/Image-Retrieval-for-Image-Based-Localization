@@ -5,13 +5,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .geometric import rotate
-from .misc import _extract_device_dtype
+
+from cirtorch.utils.helper import _extract_device_dtype
 
 
 def normalize_kernel2d(input):
     """
         Normalizes both derivative and smoothing kernel.
-
     """
     if len(input.size()) < 2:
         raise TypeError("input should be at least 2D tensor. Got {}"
@@ -24,7 +24,6 @@ def normalize_kernel2d(input):
 def get_box_kernel2d(kernel_size):
     """
         Utility function that returns a box filter.
-
     """
 
     kx = float(kernel_size[0])
@@ -40,7 +39,6 @@ def get_box_kernel2d(kernel_size):
 def box_blur(input, kernel_size, border_type='reflect', normalized=True):
     """
         Blurs an image using the box filter.
-
     """
     kernel = get_box_kernel2d(kernel_size)
 
@@ -53,7 +51,6 @@ def box_blur(input, kernel_size, border_type='reflect', normalized=True):
 def gaussian(window_size, sigma):
     """
         Computer Gaussian.
-
     """
 
     x = torch.arange(window_size) - window_size // 2
@@ -67,7 +64,6 @@ def gaussian(window_size, sigma):
 def get_gaussian_kernel1d(kernel_size, sigma, force_even=False):
     """
         Function that returns Gaussian filter coefficients.
-
     """
     if (not isinstance(kernel_size, int) or (
             (kernel_size % 2 == 0) and not force_even) or (

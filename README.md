@@ -41,7 +41,7 @@ The configuration file is a simple text file in `ini` format. The default value 
 
 To run the training:
 ```bash
-sh scripts/train.sh 
+sh scripts/train_globalF.sh 
 ```
 
 It's also highly recommended to train on multiple GPUs in order to obtain good results.

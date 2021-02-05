@@ -189,7 +189,7 @@ class Rpool(nn.Module):
         # reshape back to regions per image
         o = o.view(s[0], s[1], s[2], s[3], s[4]) # size: #im, #reg, D, 1, 1
 
-        # aggregate regions into a single global vector per image
+        # aggregate regions into a single globalFeatures vector per image
         if aggregate:
             # rvecs -> sumpool -> norm
             o = self.norm(o.sum(1, keepdim=False)) # size: #im, D, 1, 1

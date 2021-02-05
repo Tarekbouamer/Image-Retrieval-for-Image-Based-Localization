@@ -32,7 +32,7 @@ class ResNeXt(nn.Module):
         input_3x3 : bool
             If `True` use three `3x3` convolutions in the input module instead of a single `7x7` one.
         classes : int
-            If not `0` also include global average pooling and a fully-connected layer with `classes` outputs at the end
+            If not `0` also include globalFeatures average pooling and a fully-connected layer with `classes` outputs at the end
             of the network.
         dilation : list of list of int or list of int or int
             List of dilation factors, or `1` to ignore dilation. For each module, if a single value is given it is

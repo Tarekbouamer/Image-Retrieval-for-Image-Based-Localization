@@ -37,7 +37,7 @@ class DenseNet(nn.Module):
         theta : float
             Reduction factor for the transition blocks.
         classes : int
-            If not `0` also include global average pooling and a fully-connected layer with `classes` outputs at the end
+            If not `0` also include globalFeatures average pooling and a fully-connected layer with `classes` outputs at the end
             of the network.
         dilation : int or list of int
             List of dilation factors, or `1` to ignore dilation. If the dilation factor for a module is greater than `1`

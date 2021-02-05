@@ -1,16 +1,15 @@
 from math import pi
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-from .misc import (
-    check_is_tensor,
+from cirtorch.enhance.color.hsv import (
     hsv_to_rgb,
-    rgb_to_hsv,
-    _to_bchw,
-    _to_bcdhw,
-    rgb_to_grayscale)
+    rgb_to_hsv
+)
+
+from cirtorch.enhance.color.gray import (
+    rgb_to_grayscale
+)
 
 # --------------------------------------
 #             adjust color
@@ -18,10 +17,9 @@ from .misc import (
 
 
 def adjust_saturation_raw(input, saturation_factor):
-    r"""Adjust color saturation of an image. Expecting input to be in hsv format already.
     """
-
-    check_is_tensor(input)
+        Adjust color saturation of an image. Expecting input to be in hsv format already.
+    """
 
     if not isinstance(saturation_factor, (float, torch.Tensor,)):
         raise TypeError(f"The saturation_factor should be a float number or torch.Tensor."
@@ -32,9 +30,8 @@ def adjust_saturation_raw(input, saturation_factor):
 
     saturation_factor = saturation_factor.to(input.device).to(input.dtype)
 
-    # TODO: find a proper way to check bound values in batched tensors.
-    # if (saturation_factor < 0).any():
-    #     raise ValueError(f"Saturation factor must be non-negative. Got {saturation_factor}")
+    if (saturation_factor < 0).any():
+        raise ValueError(f"Saturation factor must be non-negative. Got {saturation_factor}")
 
     for _ in input.shape[1:]:
         saturation_factor = torch.unsqueeze(saturation_factor, dim=-1)
@@ -43,38 +40,36 @@ def adjust_saturation_raw(input, saturation_factor):
     h, s, v = torch.chunk(input, chunks=3, dim=-3)
 
     # transform the hue value and appl module
-    s_out: torch.Tensor = torch.clamp(s * saturation_factor, min=0, max=1)
+    s_out = torch.clamp(s * saturation_factor, min=0, max=1)
 
     # pack back back the corrected hue
-    out: torch.Tensor = torch.cat([h, s_out, v], dim=-3)
+    out = torch.cat([h, s_out, v], dim=-3)
 
     return out
 
 
 def adjust_saturation(input, saturation_factor):
-    r"""Adjust color saturation of an image.
-
-    The input image is expected to be an RGB image in the range of [0, 1].
-
+    """
+        Adjust color saturation of an image.
+        The input image is expected to be an RGB image in the range of [0, 1].
     """
 
     # convert the rgb image to hsv
-    x_hsv: torch.Tensor = rgb_to_hsv(input)
+    x_hsv = rgb_to_hsv(input)
 
     # perform the conversion
-    x_adjusted: torch.Tensor = adjust_saturation_raw(x_hsv, saturation_factor)
+    x_adjusted = adjust_saturation_raw(x_hsv, saturation_factor)
 
     # convert back to rgb
-    out: torch.Tensor = hsv_to_rgb(x_adjusted)
+    out = hsv_to_rgb(x_adjusted)
 
     return out
 
 
-def adjust_hue_raw(input, hue_factor) -> torch.Tensor:
-    r"""Adjust hue of an image. Expecting input to be in hsv format already.
+def adjust_hue_raw(input, hue_factor):
     """
-
-    check_is_tensor(input)
+        Adjust hue of an image. Expecting input to be in hsv format already.
+    """
 
     if not isinstance(hue_factor, (float, torch.Tensor)):
         raise TypeError(f"The hue_factor should be a float number or torch.Tensor in the range between"
@@ -85,9 +80,8 @@ def adjust_hue_raw(input, hue_factor) -> torch.Tensor:
 
     hue_factor = hue_factor.to(input.device, input.dtype)
 
-    # TODO: find a proper way to check bound values in batched tensors.
-    # if ((hue_factor < -pi) | (hue_factor > pi)).any():
-    #     raise ValueError(f"Hue-factor must be in the range [-PI, PI]. Got {hue_factor}")
+    if ((hue_factor < -pi) | (hue_factor > pi)).any():
+        raise ValueError(f"Hue-factor must be in the range [-PI, PI]. Got {hue_factor}")
 
     for _ in input.shape[1:]:
         hue_factor = torch.unsqueeze(hue_factor, dim=-1)
@@ -100,16 +94,15 @@ def adjust_hue_raw(input, hue_factor) -> torch.Tensor:
     h_out = torch.fmod(h + hue_factor, divisor)
 
     # pack back back the corrected hue
-    out: torch.Tensor = torch.cat([h_out, s, v], dim=-3)
+    out = torch.cat([h_out, s, v], dim=-3)
 
     return out
 
 
 def adjust_hue(input, hue_factor):
-    r"""Adjust hue of an image.
-
-    The input image is expected to be an RGB image in the range of [0, 1].
-
+    """
+        Adjust hue of an image.
+        The input image is expected to be an RGB image in the range of [0, 1].
     """
 
     # convert the rgb image to hsv
@@ -125,14 +118,11 @@ def adjust_hue(input, hue_factor):
 
 
 def adjust_contrast(input, contrast_factor):
-    r"""Adjust Contrast of an image.
-
-    This implementation aligns OpenCV, not PIL. Hence, the output differs from TorchVision.
-    The input image is expected to be in the range of [0, 1].
-
     """
-
-    check_is_tensor(input)
+        Adjust Contrast of an image.
+        This implementation aligns OpenCV, not PIL. Hence, the output differs from TorchVision.
+        The input image is expected to be in the range of [0, 1].
+    """
 
     if not isinstance(contrast_factor, (float, torch.Tensor,)):
         raise TypeError(f"The factor should be either a float or torch.Tensor. "
@@ -150,23 +140,20 @@ def adjust_contrast(input, contrast_factor):
         contrast_factor = torch.unsqueeze(contrast_factor, dim=-1)
 
     # Apply contrast factor to each channel
-    x_adjust: torch.Tensor = input * contrast_factor
+    x_adjust = input * contrast_factor
 
     # Truncate between pixel values
-    out: torch.Tensor = torch.clamp(x_adjust, 0.0, 1.0)
+    out = torch.clamp(x_adjust, 0.0, 1.0)
 
     return out
 
 
 def adjust_brightness(input, brightness_factor):
-    r"""Adjust Brightness of an image.
-
-    This implementation aligns OpenCV, not PIL. Hence, the output differs from TorchVision.
-    The input image is expected to be in the range of [0, 1].
-
     """
-
-    check_is_tensor(input)
+        Adjust Brightness of an image.
+        This implementation aligns OpenCV, not PIL. Hence, the output differs from TorchVision.
+        The input image is expected to be in the range of [0, 1].
+    """
 
     if not isinstance(brightness_factor, (float, torch.Tensor)):
         raise TypeError(f"The factor should be either a float or torch.Tensor. "
@@ -194,11 +181,10 @@ def adjust_brightness(input, brightness_factor):
 
 
 def _solarize(input, thresholds=0.5):
-    r""" For each pixel in the image, select the pixel if the value is less than the threshold.
-    Otherwise, subtract 1.0 from the pixel.
-
     """
-    check_is_tensor(input)
+        For each pixel in the image, select the pixel if the value is less than the threshold.
+        Otherwise, subtract 1.0 from the pixel.
+    """
 
     if not isinstance(thresholds, (float, torch.Tensor,)):
         raise TypeError(f"The factor should be either a float or torch.Tensor. "
@@ -207,7 +193,6 @@ def _solarize(input, thresholds=0.5):
     if isinstance(thresholds, torch.Tensor) and len(thresholds.shape) != 0:
         assert input.size(0) == len(thresholds) and len(thresholds.shape) == 1, \
             f"threshholds must be a 1-d vector of shape ({input.size(0)},). Got {thresholds}"
-        # TODO: I am not happy about this line, but no easy to do batch-wise operation
 
         thresholds = thresholds.to(input.device).to(input.dtype)
         thresholds = torch.stack([x.expand(*input.shape[1:]) for x in thresholds])
@@ -216,14 +201,11 @@ def _solarize(input, thresholds=0.5):
 
 
 def solarize(input, thresholds=0.5, additions=None):
-    r"""For each pixel in the image less than threshold.
-
-    We add 'addition' amount to it and then clip the pixel value to be between 0 and 1.0.
-    The value of 'addition' is between -0.5 and 0.5.
-
     """
-
-    check_is_tensor(input)
+        For each pixel in the image less than threshold.
+        We add 'addition' amount to it and then clip the pixel value to be between 0 and 1.0.
+        The value of 'addition' is between -0.5 and 0.5.
+    """
     if not isinstance(thresholds, (float, torch.Tensor,)):
         raise TypeError(f"The factor should be either a float or torch.Tensor. "
                         f"Got {type(thresholds)}")
@@ -245,7 +227,6 @@ def solarize(input, thresholds=0.5, additions=None):
         if isinstance(additions, torch.Tensor) and len(additions.shape) != 0:
             assert input.size(0) == len(additions) and len(additions.shape) == 1, \
                 f"additions must be a 1-d vector of shape ({input.size(0)},). Got {additions}"
-            # TODO: I am not happy about this line, but no easy to do batch-wise operation
             additions = additions.to(input.device).to(input.dtype)
             additions = torch.stack([x.expand(*input.shape[1:]) for x in additions])
 
@@ -260,12 +241,10 @@ def solarize(input, thresholds=0.5, additions=None):
 
 
 def posterize(input, bits):
-    r"""Reduce the number of bits for each color channel.
-
-    Non-differentiable function, torch.uint8 involved.
-
     """
-    check_is_tensor(input)
+        Reduce the number of bits for each color channel.
+        Non-differentiable function, torch.uint8 involved.
+    """
 
     if not isinstance(bits, (int, torch.Tensor,)):
         raise TypeError(f"bits type is not an int or torch.Tensor. Got {type(bits)}")
@@ -273,9 +252,8 @@ def posterize(input, bits):
     if isinstance(bits, int):
         bits = torch.tensor(bits)
 
-    # TODO: find a better way to check boundaries on tensors
-    # if not torch.all((bits >= 0) * (bits <= 8)) and bits.dtype == torch.int:
-    #     raise ValueError(f"bits must be integers within range [0, 8]. Got {bits}.")
+    if not torch.all((bits >= 0) * (bits <= 8)) and bits.dtype == torch.int:
+        raise ValueError(f"bits must be integers within range [0, 8]. Got {bits}.")
 
     # TODO: Make a differentiable version
     # Current version:
@@ -304,8 +282,6 @@ def posterize(input, bits):
 
     res = []
     if len(bits.shape) == 1:
-        input = _to_bchw(input)
-
         assert bits.shape[0] == input.shape[0], \
             f"Batch size must be equal between bits and input. Got {bits.shape[0]}, {input.shape[0]}."
 
@@ -329,16 +305,11 @@ def posterize(input, bits):
 
 
 def sharpness(input, sharpness_factor):
-    r"""Apply sharpness to the input tensor.
-
-    Implemented Sharpness function from PIL using torch ops. This implementation refers to:
-    https://github.com/tensorflow/tpu/blob/master/models/official/efficientnet/autoaugment.py#L326
-
     """
-    input = _to_bchw(input)
-
-    check_is_tensor(input)
-
+        Apply sharpness to the input tensor.
+        Implemented Sharpness function from PIL using torch ops. This implementation refers to:
+        https://github.com/tensorflow/tpu/blob/master/models/official/efficientnet/autoaugment.py#L326
+    """
     if len(sharpness_factor.size()) != 0:
         assert sharpness_factor.shape == torch.Size([input.size(0)]), (
             "Input batch size shall match with factor size if factor is not a 0-dim tensor. "
@@ -416,10 +387,7 @@ def _scale_channel(im):
 def equalize(input):
     """
         Apply equalize on the  tensor.
-
     """
-    input = _to_bchw(input)
-
     res = []
     for image in input:
         # Assumes RGB for now.  Scales each channel independently
@@ -437,7 +405,6 @@ def equalize(input):
 def grayscale(input):
     """
         Apply Gray Scale on a tensor.
-
     """
 
     grayscale = input.clone()
@@ -454,9 +421,6 @@ def grayscale(input):
 def _blend_one(input1, input2, factor):
     r"""Blend two images into one.
     """
-    check_is_tensor(input1)
-    check_is_tensor(input2)
-
 
     if isinstance(factor, torch.Tensor):
         assert len(factor.size()) == 0, f"Factor shall be a float or single element tensor. Got {factor}."

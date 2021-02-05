@@ -24,9 +24,9 @@ from .augmentation import (
     ColorJitter
 )
 
-from .geometric import centralize
+from cirtorch.geometry.transform.centerlize import centralize
 
-from .misc import normalize_min_max, denormalize_min_max
+from cirtorch.utils.image import normalize_min_max, denormalize_min_max
 
 
 class RandomAugmentation(nn.Module):

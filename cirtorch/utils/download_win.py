@@ -4,7 +4,7 @@ def download_test(data_dir):
     """
     DOWNLOAD_TEST Checks, and, if required, downloads the necessary datasets for the testing.
       
-        download_test(DATA_ROOT) checks if the data necessary for running the example script exist.
+        download_test(DATA_ROOT) checks if the data necessary for running the example scripts exist.
         If not it downloads it in the folder structure:
             DATA_ROOT/test/oxford5k/  : folder with Oxford images and ground truth file
             DATA_ROOT/test/paris6k/   : folder with Paris images and ground truth file
@@ -91,7 +91,7 @@ def download_train(data_dir):
     """
     DOWNLOAD_TRAIN Checks, and, if required, downloads the necessary datasets for the training.
       
-        download_train(DATA_ROOT) checks if the data necessary for running the example script exist.
+        download_train(DATA_ROOT) checks if the data necessary for running the example scripts exist.
         If not it downloads it in the folder structure:
             DATA_ROOT/train/retrieval-SfM-120k/  : folder with rsfm120k images and db files
             DATA_ROOT/train/retrieval-SfM-30k/   : folder with rsfm30k images and db files

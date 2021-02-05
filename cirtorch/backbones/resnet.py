@@ -25,7 +25,7 @@ class ResNet(nn.Module):
         Function to create normalization / activation Module. If a list is passed it should have four elements, one for
         each module of the network
     classes : int
-        If not `0` also include global average pooling and a fully-connected layer with `classes` outputs at the end
+        If not `0` also include globalFeatures average pooling and a fully-connected layer with `classes` outputs at the end
         of the network
     dilation : int or list of int
         List of dilation factors for the four modules of the network, or `1` to ignore dilation

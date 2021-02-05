@@ -23,7 +23,7 @@ class WiderResNet(nn.Module):
         norm_act : callable
             Function to create normalization / activation Module.
         classes : int
-            If not `0` also include global average pooling and a fully-connected layer with `classes` outputs at the end
+            If not `0` also include globalFeatures average pooling and a fully-connected layer with `classes` outputs at the end
             of the network.
         """
         super(WiderResNet, self).__init__()
@@ -100,7 +100,7 @@ class WiderResNetA2(nn.Module):
         norm_act : callable
             Function to create normalization / activation Module.
         classes : int
-            If not `0` also include global average pooling and a fully-connected layer with `classes` outputs at the end
+            If not `0` also include globalFeatures average pooling and a fully-connected layer with `classes` outputs at the end
             of the network.
         dilation : bool
             If `True` apply dilation to the last three modules and change the down-sampling factor from 32 to 8.

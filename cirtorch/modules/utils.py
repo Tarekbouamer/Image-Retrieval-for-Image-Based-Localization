@@ -4,13 +4,13 @@
 # because the image retrieval performance is higher for them
 
 
-# pre-computed local pca whitening that can be applied before the pooling layer
+# pre-computed localFeatures pca whitening that can be applied before the pooling layer
 L_WHITENING = {
     'resnet101' : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/whiten/retrieval-SfM-120k/retrieval-SfM-120k-resnet101-lwhiten-9f830ef.pth', # no pre l2 norm
     # 'resnet101' : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/whiten/retrieval-SfM-120k/retrieval-SfM-120k-resnet101-lwhiten-da5c935.pth', # with pre l2 norm
 }
 
-# possible global pooling layers, each on of these can be made regional
+# possible globalFeatures pooling layers, each on of these can be made regional
 
 
 # pre-computed regional whitening, for most commonly used architectures and pooling methods
@@ -21,7 +21,7 @@ R_WHITENING = {
     'resnet101-gem-r' : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/whiten/retrieval-SfM-120k/retrieval-SfM-120k-resnet101-gem-r-rwhiten-adace84.pth',
 }
 
-# pre-computed final (global) whitening, for most commonly used architectures and pooling methods
+# pre-computed final (globalFeatures) whitening, for most commonly used architectures and pooling methods
 WHITENING = {
     'alexnet-gem'            : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/whiten/retrieval-SfM-120k/retrieval-SfM-120k-alexnet-gem-whiten-454ad53.pth',
     'alexnet-gem-r'          : 'http://cmp.felk.cvut.cz/cnnimageretrieval/data/whiten/retrieval-SfM-120k/retrieval-SfM-120k-alexnet-gem-r-whiten-4c9126b.pth',

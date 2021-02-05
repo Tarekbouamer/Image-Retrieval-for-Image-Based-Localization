@@ -1,18 +1,21 @@
 
 import torch
 import torch.nn as nn
-from torch.distributions import Bernoulli
+from torch.distributions import Bernoulli, Uniform
 
-from .geometric import (
+from cirtorch.geometry.transform.flips import (
     hflip,
-    vflip,
-    rotate,
+    vflip
+)
+
+from cirtorch.geometry.transform.imgwarp import (
     warp_perspective,
     get_perspective_transform,
     warp_affine,
-    get_affine_matrix2d)
+    get_affine_matrix2d
+)
 
-from .photometric import (
+from cirtorch.enhance.adjust import (
     adjust_brightness,
     adjust_contrast,
     adjust_saturation,
@@ -21,14 +24,13 @@ from .photometric import (
     equalize,
     posterize,
     sharpness,
-    grayscale
 )
 
-from .filters import (
-    motion_blur
+from cirtorch.enhance.color.gray import (
+    rgb_to_grayscale
 )
 
-from .misc import _adapted_uniform
+from cirtorch.filters.motion import motion_blur
 
 
 class AugmentationBase(nn.Module):
@@ -36,6 +38,13 @@ class AugmentationBase(nn.Module):
     def __init__(self, p=0.2):
         super(AugmentationBase, self).__init__()
         self.p = p
+
+    def _adapted_uniform(self, shape, low, high):
+        low = torch.as_tensor(low, device=low.device, dtype=low.dtype)
+        high = torch.as_tensor(high, device=high.device, dtype=high.dtype)
+
+        dist = Uniform(low, high)
+        return dist.rsample(shape)
 
     def apply(self):
         raise NotImplemented
@@ -168,10 +177,10 @@ class RandomPerspective(AugmentationBase):
             [1, -1]
         ]], device=device, dtype=dtype)
 
-        rand_val = _adapted_uniform(start_points.shape,
-                                    torch.tensor(0, device=device, dtype=dtype),
-                                    torch.tensor(1, device=device, dtype=dtype)
-                                    ).to(device=device, dtype=dtype)
+        rand_val = self._adapted_uniform(start_points.shape,
+                                         torch.tensor(0, device=device, dtype=dtype),
+                                         torch.tensor(1, device=device, dtype=dtype)
+                                         ).to(device=device, dtype=dtype)
 
         end_points = start_points + factor * rand_val * pts_norm
 
@@ -227,7 +236,7 @@ class RandomAffine(AugmentationBase):
             f"`width` and `height` must be positive integers. Got {width}, {height}."
 
         degrees = torch.as_tensor(self.theta).to(device=device, dtype=dtype)
-        angle = _adapted_uniform((batch_size,), degrees[0], degrees[1]).to(device=device, dtype=dtype)
+        angle = self._adapted_uniform((batch_size,), degrees[0], degrees[1]).to(device=device, dtype=dtype)
 
         # compute tensor ranges
         if self.scale is not None:
@@ -236,7 +245,7 @@ class RandomAffine(AugmentationBase):
             assert len(scale.shape) == 1 and (len(scale) == 2), \
                 f"`scale` shall have 2 or 4 elements. Got {scale}."
 
-            _scale = _adapted_uniform((batch_size,), scale[0], scale[1]).unsqueeze(1).repeat(1, 2)
+            _scale = self._adapted_uniform((batch_size,), scale[0], scale[1]).unsqueeze(1).repeat(1, 2)
 
         else:
             _scale = torch.ones((batch_size, 2), device=device, dtype=dtype)
@@ -248,8 +257,8 @@ class RandomAffine(AugmentationBase):
             max_dy = translate[1] * height
 
             translations = torch.stack([
-                _adapted_uniform((batch_size,), max_dx * 0, max_dx),
-                _adapted_uniform((batch_size,), max_dy * 0, max_dy)
+                self._adapted_uniform((batch_size,), max_dx * 0, max_dx),
+                self._adapted_uniform((batch_size,), max_dy * 0, max_dy)
             ], dim=-1).to(device=device, dtype=dtype)
 
         else:
@@ -261,8 +270,8 @@ class RandomAffine(AugmentationBase):
         if self.shear is not None:
             shear = torch.as_tensor(self.shear).to(device=device, dtype=dtype)
 
-            sx = _adapted_uniform((batch_size,), shear[0], shear[1]).to(device=device, dtype=dtype)
-            sy = _adapted_uniform((batch_size,), shear[0], shear[1]).to(device=device, dtype=dtype)
+            sx = self._adapted_uniform((batch_size,), shear[0], shear[1]).to(device=device, dtype=dtype)
+            sy = self._adapted_uniform((batch_size,), shear[0], shear[1]).to(device=device, dtype=dtype)
 
             sx = sx.to(device=device, dtype=dtype)
             sy = sy.to(device=device, dtype=dtype)
@@ -322,7 +331,7 @@ class RandomRotation(AugmentationBase):
         target = self._adapted_sampling(batch_size, device, dtype)
 
         angle = torch.as_tensor(self.theta).to(device=device, dtype=dtype)
-        angle = _adapted_uniform((batch_size,), angle[0], angle[1]).to(device=device, dtype=dtype)
+        angle = self._adapted_uniform((batch_size,), angle[0], angle[1]).to(device=device, dtype=dtype)
 
         # params
         params = dict()
@@ -384,10 +393,10 @@ class ColorJitter(AugmentationBase):
         else:
             hue = torch.as_tensor([0., 0.]).to(device=device, dtype=dtype)
 
-        brightness_factor = _adapted_uniform((batch_size,), brightness[0], brightness[1]).to(device=device, dtype=dtype)
-        contrast_factor = _adapted_uniform((batch_size,), contrast[0], contrast[1]).to(device=device, dtype=dtype)
-        saturation_factor = _adapted_uniform((batch_size,), saturation[0], saturation[1]).to(device=device, dtype=dtype)
-        hue_factor = _adapted_uniform((batch_size,), hue[0], hue[1]).to(device=device, dtype=dtype)
+        brightness_factor = self._adapted_uniform((batch_size,), brightness[0], brightness[1]).to(device=device, dtype=dtype)
+        contrast_factor = self._adapted_uniform((batch_size,), contrast[0], contrast[1]).to(device=device, dtype=dtype)
+        saturation_factor = self._adapted_uniform((batch_size,), saturation[0], saturation[1]).to(device=device, dtype=dtype)
+        hue_factor = self._adapted_uniform((batch_size,), hue[0], hue[1]).to(device=device, dtype=dtype)
 
         # Params
         params = dict()
@@ -450,8 +459,8 @@ class RandomSolarize(AugmentationBase):
         else:
             additions = torch.as_tensor([0., 0.]).to(device=device, dtype=dtype)
 
-        thresholds = _adapted_uniform((batch_size,), thresholds[0], thresholds[1]).to(device=device, dtype=dtype)
-        additions = _adapted_uniform((batch_size,), additions[0], additions[1]).to(device=device, dtype=dtype)
+        thresholds = self._adapted_uniform((batch_size,), thresholds[0], thresholds[1]).to(device=device, dtype=dtype)
+        additions = self._adapted_uniform((batch_size,), additions[0], additions[1]).to(device=device, dtype=dtype)
 
         # Params
         params = dict()
@@ -494,7 +503,7 @@ class RandomPosterize(AugmentationBase):
         else:
             bits = torch.as_tensor([0., 0.]).to(device=device, dtype=dtype)
 
-        bits = _adapted_uniform((batch_size,), bits[0], bits[1]).to(device=device, dtype=dtype).int()
+        bits = self._adapted_uniform((batch_size,), bits[0], bits[1]).to(device=device, dtype=dtype).int()
 
         # Params
         params = dict()
@@ -532,7 +541,7 @@ class RandomSharpness(AugmentationBase):
         else:
             sharpness = torch.as_tensor([0., 0.]).to(device=device, dtype=dtype)
 
-        sharpness = _adapted_uniform((batch_size,), sharpness[0], sharpness[1]).to(device=device, dtype=dtype)
+        sharpness = self._adapted_uniform((batch_size,), sharpness[0], sharpness[1]).to(device=device, dtype=dtype)
 
         # Params
         params = dict()
@@ -597,7 +606,7 @@ class RandomGrayscale(AugmentationBase):
         out = inp.clone()
         target = params["target"]
 
-        out[target] = grayscale(inp)[target]
+        out[target] = rgb_to_grayscale(inp)[target]
         return out
 
 # --------------------------------------
@@ -644,12 +653,12 @@ class RandomMotionBlur(AugmentationBase):
         else:
             direction = torch.as_tensor([0, 0]).to(device=device, dtype=dtype)
 
-        kernel_size = _adapted_uniform((1,),
-                                       kernel_size[0] // 2,
-                                       kernel_size[1] // 2).to(device=device, dtype=dtype).int() * 2 + 1
+        kernel_size = self._adapted_uniform((1,),
+                                            kernel_size[0] // 2,
+                                            kernel_size[1] // 2).to(device=device, dtype=dtype).int() * 2 + 1
 
-        angle = _adapted_uniform((batch_size,), angle[0], angle[1]).to(device=device, dtype=dtype)
-        direction = _adapted_uniform((batch_size,), direction[0], direction[1]).to(device=device, dtype=dtype)
+        angle = self._adapted_uniform((batch_size,), angle[0], angle[1]).to(device=device, dtype=dtype)
+        direction = self._adapted_uniform((batch_size,), direction[0], direction[1]).to(device=device, dtype=dtype)
 
         # Params
         params = dict()

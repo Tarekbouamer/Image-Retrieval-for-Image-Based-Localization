@@ -1,22 +1,32 @@
 import torch
 import torch.nn.functional as F
 
-from .misc import (
+
+from cirtorch.geometry.conversions import (
     pi,
     deg2rad,
     rad2deg,
-    bbox_generator,
-    normalize_homography,
-    _compute_tensor_center,
-    _compute_rotation_matrix,
-    check_is_tensor,
-    create_meshgrid,
-    get_rotation_matrix2d,
-    get_shear_matrix2d,
-    convert_affinematrix_to_homography,
     convert_points_from_homogeneous,
     convert_points_to_homogeneous,
+    convert_affinematrix_to_homography
 )
+
+from cirtorch.geometry.transform.imgwarp import (
+    get_rotation_matrix2d,
+    get_shear_matrix2d)
+
+
+from cirtorch.geometry.transform.affwarp import (
+    _compute_tensor_center,
+    _compute_rotation_matrix
+)
+
+from cirtorch.geometry.warp.homography_warper import (
+    normalize_homography
+)
+
+from cirtorch.utils.grid import create_meshgrid
+
 
 # --------------------------------------
 #             Centerlize
@@ -62,8 +72,6 @@ def hflip(tensor):
         Horizontal Flipping
     """
 
-    check_is_tensor(tensor)
-
     w = tensor.shape[-1]
     return tensor[..., torch.arange(w - 1, -1, -1, device=tensor.device)]
 
@@ -72,7 +80,6 @@ def vflip(tensor):
     """
         Vertical Flipping
     """
-    check_is_tensor(tensor)
 
     h = tensor.shape[-2]
 
@@ -87,8 +94,6 @@ def rotate(tensor, angle, center=None, interpolation='bilinear', align_corners=F
     """
         Rotate input Tensor anti-clockwise about its centre.
     """
-    check_is_tensor(tensor)
-    check_is_tensor(angle)
 
     if center is not None and not torch.is_tensor(center):
         raise TypeError("Input center type is not a torch.Tensor. Got {}"
@@ -141,8 +146,6 @@ def warp_affine(src, M, dsize, interpolation='bilinear', padding_mode='zeros', a
     """
         Apply affine transformation to a tensor.
     """
-    check_is_tensor(src)
-    check_is_tensor(M)
 
     if not len(src.shape) == 4:
         raise ValueError("Input src must be a BxCxHxW tensor. Got {}"
@@ -207,8 +210,6 @@ def affine(tensor, matrix, interpolation='bilinear', align_corners=False):
 def transform_points(trans_01, points_1):
     r"""Function that applies transformations to a set of points.
     """
-    check_is_tensor(trans_01)
-    check_is_tensor(points_1)
 
     if not (trans_01.device == points_1.device and trans_01.dtype == points_1.dtype):
         raise TypeError(
@@ -250,7 +251,7 @@ def warp_grid(grid, src_homo_dst):
     # expand grid to match the input batch size
     grid = grid.expand(batch_size, -1, -1, -1)  # NxHxWx2
 
-    if len(src_homo_dst.shape) == 3:  # local homography case
+    if len(src_homo_dst.shape) == 3:  # localFeatures homography case
         src_homo_dst = src_homo_dst.view(batch_size, 1, 3, 3)  # Nx1x3x3
 
     # perform the actual grid transformation,
@@ -371,9 +372,6 @@ def warp_perspective(src, M, dsize, interpolation='bilinear', border_mode='zeros
     the specified matrix:
 
     """
-
-    check_is_tensor(src)
-    check_is_tensor(M)
 
     if not len(src.shape) == 4:
         raise ValueError("Input src must be a BxCxHxW tensor. Got {}"
