@@ -1,6 +1,8 @@
 from setuptools import setup, find_packages
 from os import path, listdir
 from pip.req import parse_requirements
+from pip.download import PipSession
+
 
 
 here = path.abspath(path.dirname(__file__))
@@ -8,7 +10,8 @@ here = path.abspath(path.dirname(__file__))
 with open(path.join(here, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
 
-req_pkgs = parse_requirements('requirements.txt')
+req_pkgs = parse_requirements('requirements.txt', session=PipSession())
+reqs = [str(pkg.req) for pkg in req_pkgs]
 
 setup(
     name='VisLoc',
@@ -37,23 +40,37 @@ setup(
 
     # Package description
     packages=[
+        "cirtorch",
+
         "cirtorch.algos",
         "cirtorch.backbones",
         "cirtorch.configuration",
+        
         "cirtorch.datasets",
         "cirtorch.datasets.localFeatures",
         "cirtorch.datasets.globalFeatures",
         "cirtorch.datasets.generic",
         "cirtorch.datasets.augmentation",
+        
         "cirtorch.enhance",
+        "cirtorch.enhance.color",
+        
         "cirtorch.filters",
+        
         "cirtorch.geometry",
+        "cirtorch.geometry.camera",
+        "cirtorch.geometry.epipolar",
+        "cirtorch.geometry.subpix",
+        "cirtorch.geometry.transform",
+        "cirtorch.geometry.warp",
+
         "cirtorch.models",
+        
         "cirtorch.modules",
         "cirtorch.modules.heads",
+        
         "cirtorch.utils",
         "cirtorch.utils.parallel",
-        "cirtorch",
     ],
     include_package_data=True,
 )
