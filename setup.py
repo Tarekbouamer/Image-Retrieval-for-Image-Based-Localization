@@ -1,10 +1,14 @@
 from setuptools import setup, find_packages
 from os import path, listdir
+from pip.req import parse_requirements
+
 
 here = path.abspath(path.dirname(__file__))
 
 with open(path.join(here, "README.md"), encoding="utf-8") as f:
     long_description = f.read()
+
+req_pkgs = parse_requirements('requirements.txt')
 
 setup(
     name='VisLoc',
@@ -25,10 +29,10 @@ setup(
     ],
 
     # Versioning
-    #use_scm_version={"root": ".", "relative_to": __file__, "write_to": "magicpoint/_version.py"},
 
     # Requirements
     setup_requires=["setuptools_scm"],
+    install_requires=req_pkgs,
     python_requires=">=3, <4",
 
     # Package description
