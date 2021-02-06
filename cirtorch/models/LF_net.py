@@ -6,7 +6,7 @@ from collections import OrderedDict
 from cirtorch.utils.sequence import pad_packed_images
 from cirtorch.utils.parallel import PackedSequence
 
-NETWORK_INPUTS = ['img1', 'img2', 'intrinsics1', 'intrinsics2', 'P', 'F', 'kpts']
+NETWORK_INPUTS = ['img1', 'img2', 'intrinsics1', 'intrinsics2', 'extrinsics1', 'extrinsics2', 'kpts']
 
 
 class localNet(nn.Module):
@@ -19,7 +19,7 @@ class localNet(nn.Module):
         self.local_algo = local_algo
         self.local_head = local_head
 
-    def forward(self, img1=None, img2=None, intrinsics1=None, intrinsics2=None, P=None, F=None, kpts=None,
+    def forward(self, img1=None, img2=None, intrinsics1=None, intrinsics2=None, extrinsics1=None, extrinsics2=None, kpts=None,
                 do_augmentaton=False, do_loss=False, do_prediction=True, **varargs):
 
         # Perform augmentation if true and exists

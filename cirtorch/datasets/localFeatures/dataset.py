@@ -21,7 +21,6 @@ from tqdm import tqdm
 
 rand = np.random.RandomState(234)
 
-
 class MegaDepthDataset(data.Dataset):
     def __init__(self, root_dir, name, split, bbx=None, transform=None, **varargs):
         self.root_dir = root_dir
@@ -179,12 +178,12 @@ class MegaDepthDataset(data.Dataset):
         return img
 
     def get_F(self, desc_1, desc_2):
+        #TODO: move this inside generator in algorithms since 
+        # we perform a sequence of geometric operations 
+        # afterward leading to recomputation of fundamental matrix
 
         k1 = self.get_intrinsics(desc_1)
         k2 = self.get_intrinsics(desc_1)
-
-        T1 = self.get_extrinsics(desc_1)
-        T2 = self.get_extrinsics(desc_2)
 
         # relative transformation
         P = T2.dot(np.linalg.inv(T1))
@@ -203,28 +202,12 @@ class MegaDepthDataset(data.Dataset):
 
         return F, E, P
 
-    def _load_item(self, item):
-        out = dict()
-
-        desc_1 = self.imgs_desc[self.img_1s[item]]
-        desc_2 = self.imgs_desc[self.img_2s[item]]
-
-        out["img1"] = self._load_img(desc_1.img_path, numpy=True)
-        out["img2"] = self._load_img(desc_2.img_path, numpy=True)
-
-        out["img1_size"] = (out["img1"].shape[0], out["img1"].shape[1])
-        out["img2_size"] = (out["img2"].shape[0], out["img2"].shape[1])
-
-        out["intrinsics1"] = self.get_intrinsics(desc_1)
-        out["intrinsics2"] = self.get_intrinsics(desc_2)
-
-        out["F"], out["E"], out["P"] = self.get_F(desc_1, desc_2)
-
+      
         return out
 
-    def generate_keypoints(self, img, size):
+    def generate_keypoints(self, img):
 
-        kpts = generate_kpts(img, self.kpt_type, self.num_kpt, size[0], size[1])
+        kpts = generate_kpts(img, self.kpt_type, self.num_kpt)
 
         return kpts
 
@@ -240,39 +223,43 @@ class MegaDepthDataset(data.Dataset):
         return keypoints
 
     def __getitem__(self, item):
-        print(item)
+        
+        out = dict()
 
-        out = self._load_item(item)
+        desc_1 = self.imgs_desc[self.img_1s[item]]
+        desc_2 = self.imgs_desc[self.img_2s[item]]
 
-        # generate candidate query points
-        keypoints = self.generate_keypoints(img=out["img1"], size=out["img1_size"])
+        # Load images
+        out["img1"] = self._load_img(desc_1.img_path)
+        out["img2"] = self._load_img(desc_2.img_path)
+       
 
-        # prune query keypoints that are not likely to have correspondence in the other image
-        if self.prune_kpt:
+        # Get intrinsics 
+        out["intrinsics1"] = self.get_intrinsics(desc_1)
+        out["intrinsics2"] = self.get_intrinsics(desc_2)
 
-            self.prune_keypoints(keypoints,
-                                 F=out["F"],
-                                 size_2=out["img2_size"],
-                                 k1=out["intrinsics1"],
-                                 k2=out["intrinsics2"],
-                                 P=out["P"],
-                                 dmin=4,
-                                 dmax=400)
+        # Get extrinsics 
+        out["extrinsics1"] = self.get_extrinsics(desc_1)
+        out["extrinsics2"] = self.get_extrinsics(desc_2)
+
+        # Generate Keypoints on img_1
+        keypoints = self.generate_keypoints(img=out["img1"])
 
         keypoints = random_choice(keypoints, self.num_kpt)
-        # convert to tensor
-        out["img1"] = torch.from_numpy(out["img1"])
-        out["img2"] = torch.from_numpy(out["img2"])
+        
+        out["kpts"] = keypoints
 
-        out["intrinsics1"] = torch.from_numpy(out["intrinsics1"].astype(np.float))
-        out["intrinsics2"] = torch.from_numpy(out["intrinsics2"].astype(np.float))
+        # Scale images/intrinsics to desired scale range
+        # form *.any to torch.Tensor 
+    
+        out = self.transform(out)
 
-        out["P"] = torch.from_numpy(out["P"].astype(np.float))[:3, :]
-        out["F"] = torch.from_numpy(out["F"].astype(np.float) / (out["F"][-1, -1] + 1e-10))
+        # Extra infos about tuple
+        out["img1_size"] = (out["img1"].shape[1], out["img1"].shape[2])
+        out["img2_size"] = (out["img2"].shape[1], out["img2"].shape[2])
 
-        out["kpts"] = torch.from_numpy(keypoints.astype(np.float))
-
-        # we perform transformation after auto augmentation
+        out["img1_path"] = desc_1.img_path
+        out["img2_path"] = desc_2.img_path
 
         return out
 

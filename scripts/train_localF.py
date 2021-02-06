@@ -7,6 +7,7 @@ from collections import OrderedDict
 import numpy as np
 from tqdm import tqdm
 
+
 import torch
 import torch.optim as optim
 import torch.utils.data as data
@@ -315,7 +316,9 @@ def make_model(args, config):
         output_dim = fpn_config.getint("out_channels")
     else:
         output_dim = OUTPUT_DIM[body_config.get("arch")]
-
+    
+    #TODO: add local feature head , loss, and algo plus return model
+    
     return body, net_modules, output_dim
 
 
@@ -393,13 +396,24 @@ def set_batchnorm_eval(m):
         # p.requires_grad = False
 
 
+def visualize(config, dataloader):
+    
+    for it, batch in enumerate(dataloader):
+        print(batch["img1"][0].shape)
+        print(batch["intrinsics1"][0])
+        print(batch["extrinsics1"][0])
+        print(batch["img1_size"][0])
+        print(batch["img1_path"][0])
+
+        input()
+
+
 def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
 
     # Create tuples for training
     data_config = config["dataloader"]
 
-
-    # switch to train mode
+    # Switch to train mode
     model.train()
     dataloader.batch_sampler.set_epoch(varargs["epoch"])
     optimizer.zero_grad()
@@ -412,14 +426,8 @@ def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
     data_time = time.time()
 
     for it, batch in enumerate(dataloader):
-        print(batch)
-        input()
-        # Upload batch
-        #for k in NETWORK_INPUTS:
-         #   if isinstance(batch[k][0], PackedSequence):
-        #        batch[k] = [item.cuda(device=varargs["device"], non_blocking=True) for item in batch[k]]
-        #    else:
-        #        batch[k] = batch[k].cuda(device=varargs["device"], non_blocking=True)
+        #Upload batch
+        batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in NETWORK_INPUTS}
 
         # Measure data loading time
         data_time_meter.update(torch.tensor(time.time() - data_time))
@@ -812,7 +820,11 @@ def main(args):
             scheduler.step(epoch)
 
         score = {}
-
+        # TODO: Remove Debug lines
+        
+        #visualize(config, train_dataloader)
+        #pass
+        
         # Run training
         global_step = train(model, config, train_dataloader, optimizer, scheduler, meters,
                             summary=summary,

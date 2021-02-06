@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+from numpy.core.records import array
 
 
 def skew(x):
@@ -52,7 +53,11 @@ def perspective_transform(img, param=0.001):
     return dst, M
 
 
-def generate_kpts(img, mode, num_pts, h, w):
+def generate_kpts(img, mode, num_pts):
+    
+    w, h = img.size
+    img = np.asarray(img)
+
     # generate candidate query points
     if mode == 'random':
         kp1_x = np.random.rand(num_pts) * (w - 1)
@@ -64,7 +69,9 @@ def generate_kpts(img, mode, num_pts, h, w):
         sift = cv2.xfeatures2d.SIFT_create(nfeatures=num_pts)
         kp1 = sift.detect(gray1)
         coord = np.array([[kp.pt[0], kp.pt[1]] for kp in kp1])
-
+    
+    #TODO: Add Superpoints as well alone + mixed 
+    
     elif mode == 'mixed':
         kp1_x = np.random.rand(1 * int(0.1 * num_pts)) * (w - 1)
         kp1_y = np.random.rand(1 * int(0.1 * num_pts)) * (h - 1)
@@ -72,19 +79,21 @@ def generate_kpts(img, mode, num_pts, h, w):
 
         sift = cv2.xfeatures2d.SIFT_create(nfeatures=int(0.9 * num_pts))
         gray1 = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        
         kp1_sift = sift.detect(gray1)
         kp1_sift = np.array([[kp.pt[0], kp.pt[1]] for kp in kp1_sift])
+        
         if len(kp1_sift) == 0:
             coord = kp1_rand
         else:
             coord = np.concatenate((kp1_rand, kp1_sift), 0)
 
     else:
-        raise Exception('unknown type of keypoints')
+        raise Exception('Unknown type of keypoints')
 
     return coord
 
-
+#TODO: use this function in algo, using geomtry pkgs
 def prune_kpts(kpts, F, img_2_size, k1, k2, P, d_min, d_max):
 
     # compute the epipolar lines corresponding to img coordinates 1
