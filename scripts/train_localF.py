@@ -53,8 +53,6 @@ from cirtorch.utils.snapshot import save_snapshot, resume_from_snapshot, pre_tra
 from cirtorch.utils.meters import AverageMeter
 from cirtorch.utils.parallel import DistributedDataParallel, PackedSequence
 
-min_loss = float('inf')
-
 LAYERS = NORM_LAYERS + OTHER_LAYERS
 
 
@@ -563,148 +561,7 @@ def validate(model, config, dataloader, **varargs):
 
 def test(args, config, model, rank=None, world_size=None, **varargs):
 
-    log_debug('Evaluating network on test datasets...')
-
-    # Eval mode
-    model.eval()
-    data_config = config["dataloader"]
-
-    # Average score
-    avg_score = 0.0
-
-    # Evaluate on test datasets
-    list_datasets = data_config.getstruct("test_datasets")
-
-    if data_config.get("multi_scale"):
-        scales = eval(data_config.get("multi_scale"))
-    else:
-        scales = [1]
-
-    for dataset in list_datasets:
-
-        start = time.time()
-
-        log_debug('{%s}: Loading Dataset', dataset)
-
-        # Prepare database
-        db = ParisOxfordTestDataset(root_dir=path.join(args.data, 'test', dataset),
-                                    name=dataset)
-
-        batch_size = data_config.getint("test_batch_size")
-
-        with torch.no_grad():
-            """ Paris and Oxford are :
-                    1 - resized to a ratio of desired max size, after bbx cropping 
-                    2 - normalized after that
-                    3 - not flipped and not scaled (!! important for evaluation)
-                
-            """
-            # Prepare query loader
-            log_debug('{%s}: Extracting descriptors for query images', dataset)
-
-            query_tf = ISSTestTransform(shortest_size=data_config.getint("test_shortest_size"),
-                                        longest_max_size=data_config.getint("test_longest_max_size"),
-                                        random_scale=data_config.getstruct("random_scale"))
-
-            query_data = ISSDataset(root_dir='',
-                                    name="query",
-                                    images=db['query_names'],
-                                    bbx=db['query_bbx'],
-                                    transform=query_tf)
-
-            query_sampler = DistributedARBatchSampler(data_source=query_data,
-                                                      batch_size=data_config.getint("test_batch_size"),
-                                                      num_replicas=world_size,
-                                                      rank=rank,
-                                                      drop_last=True,
-                                                      shuffle=False)
-
-            query_dl = torch.utils.data.DataLoader(query_data,
-                                                   batch_sampler=query_sampler,
-                                                   collate_fn=iss_collate_fn,
-                                                   pin_memory=True,
-                                                   num_workers=data_config.getstruct("num_workers"),
-                                                   shuffle=False)
-
-            # Extract query vectors
-            qvecs = torch.zeros(varargs["output_dim"], len(query_data)).cuda()
-
-            for it, batch in tqdm(enumerate(query_dl), total=len(query_dl)):
-
-                # Upload batch
-                batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in INPUTS}
-
-                _, pred = model(**batch, scales=scales, do_prediction=True, do_augmentaton=False)
-
-                distributed.barrier()
-
-                qvecs[:, it * batch_size: (it+1) * batch_size] = pred["ret_pred"]
-
-                del pred
-
-            # Prepare negative database data loader
-            log_debug('{%s}: Extracting descriptors for database images', dataset)
-
-            database_tf = ISSTestTransform(shortest_size=data_config.getint("test_shortest_size"),
-                                           longest_max_size=data_config.getint("test_longest_max_size"),
-                                           random_scale=data_config.getstruct("random_scale"))
-
-            database_data = ISSDataset(root_dir='',
-                                       name="database",
-                                       images=db['img_names'],
-                                       transform=database_tf)
-
-            database_sampler = DistributedARBatchSampler(data_source=database_data,
-                                                         batch_size=data_config.getint("test_batch_size"),
-                                                         num_replicas=world_size,
-                                                         rank=rank,
-                                                         drop_last=True,
-                                                         shuffle=False)
-
-            database_dl = torch.utils.data.DataLoader(database_data,
-                                                      batch_sampler=database_sampler,
-                                                      collate_fn=iss_collate_fn,
-                                                      pin_memory=True,
-                                                      num_workers=data_config.getstruct("num_workers"),
-                                                      shuffle=False)
-
-            # Extract negative pool vectors
-            database_vecs = torch.zeros(varargs["output_dim"], len(database_data)).cuda()
-
-            for it, batch in tqdm(enumerate(database_dl), total=len(database_dl)):
-                # Upload batch
-
-                batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in INPUTS}
-
-                _, pred = model(**batch, scales=scales, do_prediction=True, do_augmentaton=False)
-
-                distributed.barrier()
-
-                database_vecs[:, it * batch_size: (it+1) * batch_size] = pred["ret_pred"]
-
-                del pred
-
-        # Compute dot product scores and ranks on GPU
-        # scores = torch.mm(database_vecs.t(), qvecs)
-        # scores, scores_indices = torch.sort(-scores, dim=0, descending=False)
-
-        # convert to numpy
-        qvecs = qvecs.cpu().numpy()
-        database_vecs = database_vecs.cpu().numpy()
-
-        # search, rank, and print
-        scores = np.dot(database_vecs.T, qvecs)
-        ranks = np.argsort(-scores, axis=0)
-
-        score = compute_map_and_print(dataset, ranks, db['gnd'], log_info)
-        log_info('{%s}: Running time = %s', dataset, htime(time.time()-start))
-
-        avg_score += 0.5 * score["mAP"]
-
-    # As Evaluation metrics
-    log_info('Average score = %s', avg_score)
-
-    return avg_score
+    return 0
 
 
 def save_checkpoint(state, is_best, directory):
@@ -716,8 +573,6 @@ def save_checkpoint(state, is_best, directory):
 
 
 def main(args):
-
-    global min_loss
 
     # Initialize multi-processing
     distributed.init_process_group(backend='nccl', init_method='env://')
