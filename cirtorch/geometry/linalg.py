@@ -101,6 +101,42 @@ def compose_transformations(trans_01, trans_12):
     return trans_02
 
 
+def project_points(intrinsics, xyz):
+    """ 
+        x = K X
+    """
+
+    if not intrinsics.dim() in (2, 3) and intrinsics.shape[-2:] == (3, 3):
+        raise ValueError("Input size must be a Nx3x3 or 3x3. Got {}"
+                         .format(intrinsics.shape))
+
+    xyz_h = torch.bmm(xyz, intrinsics.permute(0, 2, 1))
+
+    uv = convert_points_from_homogeneous(xyz_h)
+    print(uv[:20])
+    return uv
+
+
+def unproject_points(intrinsics, uv):
+    """ 
+        X = inv(K) x
+    """
+
+    if not intrinsics.dim() in (2, 3) and intrinsics.shape[-2:] == (3, 3):
+        raise ValueError("Input size must be a Nx3x3 or 3x3. Got {}"
+                         .format(intrinsics.shape))
+    
+    intrinsics_4x4 = eye_like(4, intrinsics)
+    
+    uv_h = convert_points_to_homogeneous(uv)
+
+    inv_intrinsics = torch.inverse(intrinsics)
+
+    xyz = torch.bmm(uv_h, inv_intrinsics.permute(0, 2, 1))
+
+    return xyz
+
+    
 def inverse_transformation(trans_12):
     """
         Function that inverts a 4x4 homogeneous transformation
@@ -120,6 +156,7 @@ def inverse_transformation(trans_12):
 
     # pack to output tensor
     trans_21 = torch.zeros_like(trans_12)
+    
     trans_21[..., :3, 0:3] += rmat_21
     trans_21[..., :3, -1:] += tvec_21
     trans_21[..., -1, -1:] += 1.0
@@ -166,6 +203,7 @@ def transform_points(trans_01, points_1):
 
     # We reshape to BxNxD in case we get more dimensions, e.g., MxBxNxD
     shape_inp = list(points_1.shape)
+    
     points_1 = points_1.reshape(-1, points_1.shape[-2], points_1.shape[-1])
     trans_01 = trans_01.reshape(-1, trans_01.shape[-2], trans_01.shape[-1])
 
@@ -174,7 +212,7 @@ def transform_points(trans_01, points_1):
 
     # to homogeneous
     points_1_h = convert_points_to_homogeneous(points_1)  # BxNxD+1
-
+    
     # transform coordinates
     points_0_h = torch.bmm(points_1_h, trans_01.permute(0, 2, 1))
     points_0_h = torch.squeeze(points_0_h, dim=-1)
@@ -207,8 +245,9 @@ def transform_boxes(trans_mat, boxes, mode="xyxy"):
     if mode == "xywh":
         boxes[..., -2] = boxes[..., 0] + boxes[..., -2]  # x + w
         boxes[..., -1] = boxes[..., 1] + boxes[..., -1]  # y + h
-
-    transformed_boxes: torch.Tensor = kornia.transform_points(trans_mat, boxes.view(boxes.shape[0], -1, 2))
+    
+    transformed_boxes = transform_points(trans_mat, boxes.view(boxes.shape[0], -1, 2))
+    
     transformed_boxes = transformed_boxes.view_as(boxes)
 
     if mode == 'xywh':
@@ -216,6 +255,31 @@ def transform_boxes(trans_mat, boxes, mode="xyxy"):
         transformed_boxes[..., 3] = transformed_boxes[..., 3] - transformed_boxes[..., 1]
 
     return transformed_boxes
+
+
+def validate_points(points, img_size, offset=0):
+    """
+        remove points out of the Image after transformation, and padded it with (0, 0) for equal size tensors
+    """
+
+    h, w = img_size
+    
+    if not points.dim()==3:
+        raise ValueError("Input points must be a of the shape BxNx2 ."
+                         " Got {}".format(points.shape))
+
+    mask = (
+        (points[:, :, 0] >= 0)
+        & (points[:, :, 0] < (w ) )
+        
+        & (points[:, :, 1] >= 0)
+        & (points[:, :, 1] < (h))
+        )
+    
+    # TODO: find a better way 
+    points[~mask] = torch.tensor([0, 0], device=points.device, dtype=points.dtype)
+
+    return points
 
 
 def perspective_transform_lafs(trans_01, lafs_1):

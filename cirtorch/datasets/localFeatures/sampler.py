@@ -14,7 +14,9 @@ class ARBatchSampler(Sampler):
         self._epoch = epoch
 
         # images
-        self.img_sets = self.data_source.img_1s
+        self.img_sets = self.data_source.images
+
+
 
     def _generate_batches(self):
         g = torch.Generator()

@@ -47,13 +47,14 @@ from cirtorch.models.GF_net import ImageRetrievalNet
 from cirtorch.utils.download import download_train, download_test
 from cirtorch.utils.misc import config_to_string, scheduler_from_config, norm_act_from_config, freeze_params, \
     all_reduce_losses, NORM_LAYERS, OTHER_LAYERS
-from cirtorch.utils.evaluate import compute_map_and_print
 from cirtorch.utils.general import htime
 from cirtorch.utils.options import test_datasets_names
 from cirtorch.utils import logging
 from cirtorch.utils.snapshot import save_snapshot, resume_from_snapshot, pre_train_from_snapshots
 from cirtorch.utils.meters import AverageMeter
 from cirtorch.utils.parallel import DistributedDataParallel, PackedSequence
+
+from cirtorch.utils.evaluation.ParisOxfordEval import compute_map_and_print
 
 min_loss = float('inf')
 

@@ -485,7 +485,7 @@ def denormalize_pixel_coordinates(pixel_coordinates, height, width, eps=1e-8):
     # compute normalization factor
     hw = torch.stack([
         torch.tensor(width), torch.tensor(height)
-    ]).to(pixel_coordinates.device).to(pixel_coordinates.dtype)
+        ]).to(pixel_coordinates.device).to(pixel_coordinates.dtype)
 
     factor = torch.tensor(2.) / (hw - 1).clamp(eps)
 

@@ -49,18 +49,18 @@ class MotionBlur3D(nn.Module):
         return motion_blur3d(x, self.kernel_size, self.angle, self.direction, self.border_type)
 
 
-def motion_blur(input, kernel_size, angle, direction, border_type='constant', mode='nearest'):
+def motion_blur(inp, kernel_size, angle, direction, border_type='constant', mode='nearest'):
     """
         Perform motion blur on 2D images (4D tensor).
     """
     assert border_type in ["constant", "reflect", "replicate", "circular"]
-
+    
     kernel = get_motion_kernel2d(kernel_size, angle, direction, mode)
 
-    return filter2D(input, kernel, border_type)
+    return filter2D(inp, kernel, border_type)
 
 
-def motion_blur3d(input, kernel_size, angle, direction, border_type='constant', mode='nearest'):
+def motion_blur3d(inp, kernel_size, angle, direction, border_type='constant', mode='nearest'):
     """
         Perform motion blur on 3D volumes (5D tensor).
     """
@@ -68,4 +68,4 @@ def motion_blur3d(input, kernel_size, angle, direction, border_type='constant', 
 
     kernel = get_motion_kernel3d(kernel_size, angle, direction, mode)
 
-    return filter3D(input, kernel, border_type)
+    return filter3D(inp, kernel, border_type)

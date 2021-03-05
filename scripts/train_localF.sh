@@ -14,3 +14,4 @@ python3 -m torch.distributed.launch --nproc_per_node=$N_GPUS ./scripts/train_loc
       --directory $EXPERIMENT \
       --data $DATA_DIR \
       --local_rank 0 \
+      #--eval

@@ -7,7 +7,6 @@ def create_meshgrid(height, width, normalized_coordinates=True, device=torch.dev
         When the flag `normalized_coordinates` is set to True, the grid is
         normalized to be in the range [-1,1] to be consistent with the pytorch
         function grid_sample.
-        http://pytorch.org/docs/master/nn.html#torch.nn.functional.grid_sample
     """
 
     xs = torch.linspace(0, width - 1, width, device=device, dtype=torch.float)

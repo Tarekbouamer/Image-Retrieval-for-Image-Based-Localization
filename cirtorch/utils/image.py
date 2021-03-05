@@ -89,11 +89,11 @@ def normalize(data, mean, std):
     """
     shape = data.shape
 
-    if isinstance(mean, float):
-        mean = torch.tensor([mean] * shape[1], device=data.device, dtype=data.dtype)
+    if isinstance(mean, list):
+        mean = torch.tensor(mean, device=data.device, dtype=data.dtype)
 
-    if isinstance(std, float):
-        std = torch.tensor([std] * shape[1], device=data.device, dtype=data.dtype)
+    if isinstance(std, list):
+        std = torch.tensor(std , device=data.device, dtype=data.dtype)
 
     if not isinstance(data, torch.Tensor):
         raise TypeError("data should be a tensor. Got {}".format(type(data)))
@@ -173,8 +173,7 @@ def denormalize(data, mean, std):
 
 def normalize_min_max(x, min_val=0., max_val=1., eps=1e-6):
     """
-        Normalise an image tensor by MinMax and re-scales the value between a range.
-        The data is normalised using the following formulation:
+        Normalise an image tensor by Min Max and re-scales the value between a range.
     """
     if not isinstance(x, torch.Tensor):
         raise TypeError(f"data should be a tensor. Got: {type(x)}.")
@@ -185,26 +184,23 @@ def normalize_min_max(x, min_val=0., max_val=1., eps=1e-6):
     if not isinstance(max_val, float):
         raise TypeError(f"'b' should be a float. Got: {type(max_val)}.")
 
-    if len(x.shape) < 3:
-        raise ValueError(f"Input shape must be at least a 3d tensor. Got: {x.shape}.")
+    if len(x.shape) != 4:
+        raise ValueError(f"Input shape must be a 4d tensor. Got: {x.shape}.")
 
-    shape = x.shape
-    B, C = shape[0], shape[1]
+    B, C, H, W = x.shape
 
-    x_min = x.view(B, C, -1).min(-1)[0].view(B, C, 1)
-    x_max = x.view(B, C, -1).max(-1)[0].view(B, C, 1)
+    x_min = x.view(B, C, -1).min(-1)[0].view(B, C, 1, 1)
+    x_max = x.view(B, C, -1).max(-1)[0].view(B, C, 1, 1)
 
-    x_out = ((max_val - min_val) * (x.view(B, C, -1) - x_min) / (x_max - x_min + eps) + min_val)
+    x_out = ((max_val - min_val) * (x - x_min) / (x_max - x_min + eps) + min_val)
 
-    return x_out.view(shape)
+    return x_out.expand_as(x), x_min, x_max
 
 
 def denormalize_min_max(x, x_min, x_max, eps=1e-6):
     """
         Normalise an image tensor by MinMax and re-scales the value between a range.
     """
-
-    #TODO: double check this function
 
     if not isinstance(x, torch.Tensor):
         raise TypeError(f"data should be a tensor. Got: {type(x)}.")

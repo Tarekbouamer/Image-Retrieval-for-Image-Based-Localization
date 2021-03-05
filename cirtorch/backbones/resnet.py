@@ -154,8 +154,9 @@ class ResNet(nn.Module):
         outs["mod1"] = self.mod1(x)
         outs["mod2"] = self.mod2(outs["mod1"])
         outs["mod3"] = self.mod3(outs["mod2"])
-        outs["mod4"] = self.mod4(outs["mod3"])
-        outs["mod5"] = self.mod5(outs["mod4"])
+
+        #outs["mod4"] = self.mod4(outs["mod3"])
+        #outs["mod5"] = self.mod5(outs["mod4"])
 
         if hasattr(self, "classifier"):
             outs["classifier"] = self.classifier(outs["mod5"])

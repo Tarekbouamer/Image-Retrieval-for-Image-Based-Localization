@@ -3,9 +3,23 @@ import torch
 import torch.nn as nn
 from torch.distributions import Bernoulli, Uniform
 
+from cirtorch.geometry.linalg import(
+    transform_points,
+    transform_boxes,
+    validate_points
+    )
+
+from cirtorch.geometry.conversions import convert_affinematrix_to_homography
+from cirtorch.geometry.transform.centerlize import centralize
 from cirtorch.geometry.transform.flips import (
     hflip,
     vflip
+)
+
+from cirtorch.geometry.transform.affwarp import (
+    _compute_tensor_center,
+    _compute_rotation_matrix,
+    rotate
 )
 
 from cirtorch.geometry.transform.imgwarp import (
@@ -40,110 +54,165 @@ class AugmentationBase(nn.Module):
         self.p = p
 
     def _adapted_uniform(self, shape, low, high):
+        """
+            The Uniform Dist function, used to choose parameters within a range 
+        """
         low = torch.as_tensor(low, device=low.device, dtype=low.dtype)
         high = torch.as_tensor(high, device=high.device, dtype=high.dtype)
 
         dist = Uniform(low, high)
         return dist.rsample(shape)
 
-    def apply(self):
-        raise NotImplemented
-
-    def generator(self):
-        raise NotImplemented
-
     def _adapted_sampling(self, shape, device, dtype):
-        r"""The uniform sampling function that accepts 'same_on_batch'.
-        If same_on_batch is True, all values generated will be exactly same given a batch_size (shape[0]).
-        By default, same_on_batch is set to False.
+        """
+            The Bernoulli sampling function, used to sample from batch
         """
         _bernoulli = Bernoulli(torch.tensor(float(self.p), device=device, dtype=dtype))
         target = _bernoulli.sample((shape,)).bool()
         return target
 
-    def forward(self, img):
+    def generator(self):
+        raise NotImplemented
 
-        img_size = img.shape[-2:]
-        batch_size = img.shape[0]
+    def apply_img(self, img=None, transform=None, target=None):
+        raise NotImplemented
+
+    def apply_kpts(self, kpts=None, transform=None, target=None):
+        raise NotImplemented
+
+    def apply_bbx(self, bbx=None, transform=None, target=None):
+        raise NotImplemented
+    
+    def apply_transform(self, transform0=None, transform=None, target=None):
+        out = transform0.clone()
+
+        out[target] = torch.matmul(transform0, transform)[target]
+        
+        return out 
+
+    def get_transform(self, params=None):
+        raise NotImplemented
+
+    def forward(self, inp):
+
+        img_size = inp["img"].shape[-2:]
+        batch_size = inp["img"].shape[0]
+        valid_size = inp["valid_size"]
 
         # get target tensors
-        params = self.generator(batch_size, img_size,  device=img.device, dtype=img.dtype)
+        params = self.generator(batch_size, img_size, valid_size, device=inp["img"].device, dtype=inp["img"].dtype)
 
-        # apply transform
-        img = self.apply(img, params)
+        # Get transform
+        transform = self.get_transform(params=params)
 
-        return img
+        # Apply transform to img
+        inp["img"] = self.apply_img(img=inp["img"], transform=transform, target=params["target"])
+
+        # Apply transform to kpts
+        if inp.__contains__("kpts"):
+            inp["kpts"] = self.apply_kpts(kpts=inp["kpts"], transform=transform, img_size=img_size, target=params["target"])
+
+        # Apply transform to bbx
+        if inp.__contains__("bbx"):
+            inp["bbx"] = self.apply_bbx(bbx=inp["bbx"], transform=transform,target=params["target"])      
+        
+        # Total transform
+        if inp.__contains__("transform"):
+            if isinstance(transform, torch.Tensor):
+                inp["transform"] = self.apply_transform(transform0=inp["transform"], transform=transform, target=params["target"])
+
+        return inp
+
+# --------------------------------------
+#             Centralize
+# --------------------------------------
+
+class Centralize(AugmentationBase):
+    """ 
+        Applies a transformatioon to centralize images in tile.
+    """
+    def __init__(self, interpolation='bilinear', padding_mode='zeros', align_corners=False, bbx_mode="xywh"):
+        super(Centralize, self).__init__(p=1)
+
+        self.bbx_mode = bbx_mode
+        self.interpolation = interpolation
+        self.padding_mode = padding_mode
+        self.align_corners = align_corners
+    
+    
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
+
+        target = self._adapted_sampling(batch_size, device, dtype)
+
+        sizes = [torch.tensor([item[0], item[1]]) for item in valid_size]
+        sizes = torch.stack(sizes).to(device=device, dtype=dtype)
+
+        max_size = img_size
+        max_size = torch.tensor([max_size[0], max_size[1]]).float().to(device=device, dtype=dtype)
+
+        # params
+        params = dict()
+        
+        params["target"] = target
+        
+        params["sizes"] = sizes
+        params["max_size"] = max_size
+        
+        return params
+
+    def get_transform(self, params):
+        
+        transform = centralize(sizes=params["sizes"], max_size=params["max_size"])
+
+        return transform
+
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+        size = img.shape[-2:]
+
+        out[target]= warp_affine(img, transform, size,
+                                mode=self.interpolation,
+                                padding_mode=self.padding_mode,
+                                align_corners=self.align_corners)[target]
+
+        return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        out = kpts.clone()
+
+        out[target] =  transform_points(trans_01=transform, points_1=kpts)[target]
+
+        return out
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        out = bbx.clone()
+
+        out[target] =  transform_boxes(trans_mat=transform, boxes=bbx, mode=self.bbx_mode)[target]
+
+        return out
 
 # --------------------------------------
 #             Geometric
 # --------------------------------------
-
-
-class RandomHorizontalFlip(AugmentationBase):
-    r"""Applies a random horizontal flip to a tensor image or a batch of tensor images with a given probability.
-
-    Input should be a tensor of shape (C, H, W) or a batch of tensors :math:`(B, C, H, W)`.
-    If Input is a tuple it is assumed that the first element contains the aforementioned tensors and the second,
-    the corresponding transformation matrix that has been applied to them. In this case the module
-    will Horizontally flip the tensors and concatenate the corresponding transformation matrix to the
-    previous one. This is especially useful when using this functionality as part of an ``nn.Sequential`` module.
-
-    """
-
-    def __init__(self, p=0.2):
-        super(RandomHorizontalFlip, self).__init__(p=p)
-
-    def generator(self, batch_size, img_size, device, dtype):
-
-        target = self._adapted_sampling(batch_size, device, dtype)
-
-        # params
-        params = dict()
-        params["target"] = target
-        return params
-
-    def apply(self, inp, params):
-        out = inp.clone()
-        target = params["target"]
-        out[target] = hflip(inp)[target]
-        return out
-
-
-class RandomVerticalFlip(AugmentationBase):
-
-    r"""Applies a random vertical flip to a tensor image or a batch of tensor images with a given probability.
-    """
-    def __init__(self, p=0.2):
-        super(RandomVerticalFlip, self).__init__(p=p)
-
-    def generator(self, batch_size, img_size, device, dtype):
-        target = self._adapted_sampling(batch_size, device, dtype)
-
-        # params
-        params = dict()
-        params["target"] = target
-        return params
-
-    def apply(self, inp, params):
-        out = inp.clone()
-        target = params["target"]
-        out[target] = vflip(inp)[target]
-        return out
-
 
 class RandomPerspective(AugmentationBase):
     r"""Applies a random perspective transformation to an image tensor with a given probability.
 
     """
 
-    def __init__(self, p, distortion_scale, interpolation='bilinear', border_mode='zeros', align_corners=False):
+    def __init__(self, p, distortion_scale, interpolation='bilinear', border_mode='zeros', align_corners=False, bbx_mode="xywh"):
         super(RandomPerspective, self).__init__(p=p)
         self.distortion_scale = distortion_scale
+        
+        self.bbx_mode = bbx_mode
         self.interpolation = interpolation
         self.border_mode = border_mode
         self.align_corners = align_corners
 
-    def generator(self, batch_size, img_size, device, dtype):
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
 
         target = self._adapted_sampling(batch_size, device, dtype)
 
@@ -191,42 +260,62 @@ class RandomPerspective(AugmentationBase):
 
         return params
 
-    def apply(self, inp, params):
+    def get_transform(self, params):
+        
+        transform = get_perspective_transform(params['start_points'], params['end_points'])
 
-        out = inp.clone()
-        target = params["target"]
+        return transform
 
-        transform = get_perspective_transform(params['start_points'], params['end_points']).type_as(inp)
+    def apply_img(self, img, transform, target):
 
-        size = inp.shape[-2:]
+        out = img.clone()
+        size = img.shape[-2:]
 
-        out[target] = warp_perspective(inp, transform, size,
-                                       interpolation=self.interpolation,
+        out[target] = warp_perspective(img, transform, size,
+                                       mode=self.interpolation,
                                        border_mode=self.border_mode,
                                        align_corners=self.align_corners)[target]
+
+        return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        out = kpts.clone()
+
+        out[target] =  transform_points(trans_01=transform, points_1=kpts)[target]
+
+        out[target] = validate_points(points=out, img_size=img_size, offset=7)[target]
+
+        return out
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        out = bbx.clone()
+
+        out[target] =  transform_boxes(trans_mat=transform, boxes=bbx, mode=self.bbx_mode)[target]
 
         return out
 
 
 class RandomAffine(AugmentationBase):
-    r"""Applies a random 2D affine transformation to a tensor image.
-
-    The transformation is computed so that the image center is kept invariant.
+    """
+        Applies a random 2D affine transformation to a tensor image.
     """
 
     def __init__(self, p, theta, h_trans, v_trans, scale, shear,
-                 interpolation='bilinear', padding_mode='zeros', align_corners=False):
+                 interpolation='bilinear', padding_mode='zeros', align_corners=False, bbx_mode="xywh"):
         super(RandomAffine, self).__init__(p=p)
         self.theta = [-theta, theta]
         self.translate = [h_trans, v_trans]
         self.scale = scale
         self.shear = shear
 
+        self.bbx_mode = bbx_mode
         self.interpolation = interpolation
         self.padding_mode = padding_mode
         self.align_corners = align_corners
 
-    def generator(self, batch_size, img_size, device, dtype):
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
 
         height, width = img_size
 
@@ -289,66 +378,123 @@ class RandomAffine(AugmentationBase):
         params["sy"] = sy
         return params
 
-    def apply(self, inp, params):
-
-        out = inp.clone()
-        target = params["target"]
-
+    def get_transform(self, params):
+        
         # concatenate transforms
         transform = get_affine_matrix2d(translations=params["translations"],
                                         center=params["center"],
                                         scale=params["scale"],
                                         angle=params["angle"],
                                         sx=params["sx"],
-                                        sy=params["sy"]).type_as(inp)
-        size = inp.shape[-2:]
+                                        sy=params["sy"])
+        return transform
 
-        out[target] = warp_affine(inp, transform, size,
-                                  interpolation=self.interpolation,
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+        size = img.shape[-2:]
+
+        out[target] = warp_affine(img, transform, size,
+                                  mode=self.interpolation,
                                   padding_mode=self.padding_mode,
                                   align_corners=self.align_corners)[target]
+        return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        out = kpts.clone()
+
+        out[target] =  transform_points(trans_01=transform, points_1=kpts)[target]
+
+        out[target] = validate_points(points=out, img_size=img_size, offset=7)[target]
+
+        return out
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        out = bbx.clone()
+
+        out[target] =  transform_boxes(trans_mat=transform, boxes=bbx, mode=self.bbx_mode)[target]
 
         return out
 
 
+
 class RandomRotation(AugmentationBase):
-    r"""Applies a random rotation to a tensor image or a batch of tensor images given an amount of degrees.
+    """
+        Applies a random rotation to a tensor image or a batch of tensor images given an amount of degrees.
     """
 
-    def __init__(self, p, theta, interpolation='bilinear', padding_mode='zeros', align_corners=False):
+    def __init__(self, p, theta, interpolation='bilinear', padding_mode='zeros', align_corners=False, bbx_mode="xywh"):
         super(RandomRotation, self).__init__(p=p)
 
         self.theta = [-theta, theta]
 
+        self.bbx_mode = bbx_mode
         self.interpolation = interpolation
         self.padding_mode = padding_mode
         self.align_corners = align_corners
 
-    def generator(self, batch_size, img_size, device, dtype):
-        r"""Get parameters for ``rotate`` for a random rotate transform.
-
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
+        """
+            Get parameters for ``rotate`` for a random rotate transform.
         """
         target = self._adapted_sampling(batch_size, device, dtype)
 
         angle = torch.as_tensor(self.theta).to(device=device, dtype=dtype)
         angle = self._adapted_uniform((batch_size,), angle[0], angle[1]).to(device=device, dtype=dtype)
 
+        #
+        center = _compute_tensor_center(img_size, device=device, dtype=dtype)
+        center = center.expand(batch_size, -1)
+        
+        angle = angle.expand(batch_size)
+
         # params
         params = dict()
         params["target"] = target
         params["angle"] = angle
+        params["center"] = center
+
 
         return params
+    
+    def get_transform(self, params):
 
-    def apply(self, inp, params):
+        transform = _compute_rotation_matrix(params["angle"], params["center"])
+        return transform
 
-        out = inp.clone()
-        target = params["target"]
+    def apply_img(self, img, transform, target):
 
-        out[target] = rotate(inp,
-                             angle=params["angle"],
-                             align_corners=self.align_corners,
-                             interpolation=self.interpolation)[target]
+        out = img.clone()
+        size = img.shape[-2:]
+
+
+        out[target] = warp_affine(img, transform, size,
+                                  mode=self.interpolation,
+                                  padding_mode=self.padding_mode,
+                                  align_corners=self.align_corners)[target]
+
+        #out[target] = rotate(img, transform,
+        #                    align_corners=self.align_corners,
+        #                    mode=self.interpolation)[target]
+        return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        out = kpts.clone()
+
+        out[target] =  transform_points(trans_01=transform, points_1=kpts)[target]
+
+        out[target] = validate_points(points=out, img_size=img_size, offset=7)[target]
+
+        return out
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        out = bbx.clone()
+
+        out[target] =  transform_boxes(trans_mat=transform, boxes=bbx, mode=self.bbx_mode)[target]
 
         return out
 
@@ -367,7 +513,7 @@ class ColorJitter(AugmentationBase):
         self.saturation = saturation
         self.hue = hue
 
-    def generator(self, batch_size, img_size, device, dtype):
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
         r"""Generate random color jiter parameters for a batch of images.
         """
 
@@ -397,7 +543,6 @@ class ColorJitter(AugmentationBase):
         contrast_factor = self._adapted_uniform((batch_size,), contrast[0], contrast[1]).to(device=device, dtype=dtype)
         saturation_factor = self._adapted_uniform((batch_size,), saturation[0], saturation[1]).to(device=device, dtype=dtype)
         hue_factor = self._adapted_uniform((batch_size,), hue[0], hue[1]).to(device=device, dtype=dtype)
-
         # Params
         params = dict()
 
@@ -406,29 +551,41 @@ class ColorJitter(AugmentationBase):
         params["hue_factor"] = hue_factor
         params["saturation_factor"] = saturation_factor
 
-        params["order"] = torch.randperm(4, device=device, dtype=dtype).long()
         params["target"] = target
 
         return params
 
-    def apply(self, inp, params):
+    def get_transform(self, params):
 
-        transforms = [
+        transform = [
             lambda img: adjust_brightness(img, brightness_factor=params["brightness_factor"]),
             lambda img: adjust_contrast(img, contrast_factor=params["contrast_factor"]),
             lambda img: adjust_saturation(img, saturation_factor=params["saturation_factor"]),
             lambda img: adjust_hue(img, hue_factor=params["hue_factor"])
         ]
 
-        out = inp.clone()
-        target = params["target"]
+        return transform
 
-        for idx in params['order'].tolist():
+    def apply_img(self, img, transform, target):
 
-            transformation = transforms[idx]
-            out[target] = transformation(inp)[target]
+        out = img.clone()
+        
+        order = torch.randperm(4, device=img.device, dtype=img.dtype).long()
+
+        for idx in order.tolist():
+
+            JIT = transform[idx]
+            
+            out[target] = JIT(img)[target]
 
         return out
+
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+        return bbx
 
 
 class RandomSolarize(AugmentationBase):
@@ -440,12 +597,13 @@ class RandomSolarize(AugmentationBase):
         self.thresholds = thresholds
         self.additions = additions
 
-    def generator(self, batch_size, img_size, device, dtype):
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
 
-        r"""Generate random solarize parameters for a batch of images.
-        For each pixel in the image less than threshold, we add 'addition' amount to it and then clip the pixel value
-        to be between 0 and 1.0
-
+        """
+            Generate random solarize parameters for a batch of images.
+            For each pixel in the image less than threshold, 
+            we add 'addition' amount to it and then clip the pixel value
+            to be between 0 and 1.0
         """
         target = self._adapted_sampling(batch_size, device, dtype)
 
@@ -471,17 +629,28 @@ class RandomSolarize(AugmentationBase):
         params["target"] = target
 
         return params
+    
+    def get_transform(self, params):
 
-    def apply(self, inp, params):
+        transform = lambda img: solarize(img, thresholds=params["thresholds"], additions=params["additions"])
 
-        out = inp.clone()
-        target = params["target"]
+        return transform
+    
+    def apply_img(self, img, transform, target):
 
-        out[target] = solarize(inp,
-                               thresholds=params["thresholds"],
-                               additions=params["additions"])[target]
+        out = img.clone()
+
+        out[target] = transform(img)[target]
 
         return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        return bbx
 
 
 class RandomPosterize(AugmentationBase):
@@ -491,9 +660,9 @@ class RandomPosterize(AugmentationBase):
         super(RandomPosterize, self).__init__(p=p)
         self.bits = bits
 
-    def generator(self, batch_size, img_size, device, dtype):
-        r"""Generate random posterize parameters for a batch of images.
-
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
+        """
+            Generate random posterize parameters for a batch of images.
         """
 
         target = self._adapted_sampling(batch_size, device, dtype)
@@ -512,26 +681,41 @@ class RandomPosterize(AugmentationBase):
         params["target"] = target
         return params
 
-    def apply(self, inp, params):
-        out = inp.clone()
-        target = params["target"]
+    
+    def get_transform(self, params):
 
-        out[target] = posterize(inp, bits=params["bits"])[target]
+        transform = lambda img: posterize(img, bits=params["bits"])
+
+        return transform
+    
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+
+        out[target] = transform(img)[target]
 
         return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        return bbx
 
 
 class RandomSharpness(AugmentationBase):
-    r"""Sharpen given tensor image or a batch of tensor images randomly.
-
+    """
+        Sharpen given tensor image or a batch of tensor images randomly.
     """
     def __init__(self, p, sharpness=0.5):
         super(RandomSharpness, self).__init__(p=p)
         self.sharpness = sharpness
 
-    def generator(self, batch_size, img_size, device, dtype):
-        r"""Generate random sharpness parameters for a batch of images.
-
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
+        """
+            Generate random sharpness parameters for a batch of images.
         """
 
         target = self._adapted_sampling(batch_size, device, dtype)
@@ -551,20 +735,35 @@ class RandomSharpness(AugmentationBase):
 
         return params
 
-    def apply(self, inp, params):
 
-        out = inp.clone()
-        target = params["target"]
+    def get_transform(self, params):
 
-        out[target] = sharpness(inp, sharpness_factor=params["sharpness"])[target]
+        transform = lambda img: sharpness(img, sharpness_factor=params["sharpness"])
+
+        return transform
+    
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+
+        out[target] = transform(img)[target]
+
         return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        return bbx
 
 
 class RandomEqualize(AugmentationBase):
     def __init__(self, p):
         super(RandomEqualize, self).__init__(p=p)
 
-    def generator(self, batch_size, img_size, device, dtype):
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
         r"""Generate random Equalize parameters for a batch of images.
 
         """
@@ -576,12 +775,28 @@ class RandomEqualize(AugmentationBase):
         params["target"] = target
         return params
 
-    def apply(self, inp, params):
-        out = inp.clone()
-        target = params["target"]
 
-        out[target] = equalize(inp)[target]
+    def get_transform(self, params):
+
+        transform = lambda img: equalize(img)
+
+        return transform
+    
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+
+        out[target] = transform(img)[target]
+
         return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        return bbx
 
 
 class RandomGrayscale(AugmentationBase):
@@ -590,7 +805,7 @@ class RandomGrayscale(AugmentationBase):
     def __init__(self, p=0.1):
         super(RandomGrayscale, self).__init__(p=p)
 
-    def generator(self, batch_size, img_size, device, dtype):
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
         r"""Generate random Equalize parameters for a batch of images.
 
         """
@@ -602,12 +817,27 @@ class RandomGrayscale(AugmentationBase):
         params["target"] = target
         return params
 
-    def apply(self, inp, params):
-        out = inp.clone()
-        target = params["target"]
+    def get_transform(self, params):
 
-        out[target] = rgb_to_grayscale(inp)[target]
+        transform = lambda img: rgb_to_grayscale(img)
+
+        return transform
+    
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+
+        out[target] = transform(img)[target]
+
         return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        return bbx
 
 # --------------------------------------
 #             Filters
@@ -615,7 +845,8 @@ class RandomGrayscale(AugmentationBase):
 
 
 class RandomMotionBlur(AugmentationBase):
-    r"""Perform motion blur on 2D images (4D tensor).
+    """
+        Perform motion blur on 2D images (4D tensor).
     """
 
     def __init__(self, p, kernel_size, angle, direction,
@@ -630,10 +861,9 @@ class RandomMotionBlur(AugmentationBase):
         self.border_mode = border_mode
         self.align_corners = align_corners
 
-    def generator(self, batch_size, img_size, device, dtype):
-
-        r"""Get parameters for motion blur.
-
+    def generator(self, batch_size, img_size, valid_size, device, dtype):
+        """
+            Get parameters for motion blur.
         """
 
         target = self._adapted_sampling(batch_size, device, dtype)
@@ -671,16 +901,86 @@ class RandomMotionBlur(AugmentationBase):
 
         return params
 
-    def apply(self, inp, params):
-        out = inp.clone()
-        target = params["target"]
-        out[target] = motion_blur(inp,
-                                  kernel_size=params["kernel_size"],
-                                  angle=params["angle"],
-                                  direction=params["direction"])[target]
+    def get_transform(self, params):
+
+        transform = lambda img: motion_blur(img, 
+                                            kernel_size=params["kernel_size"],
+                                            angle=params["angle"],
+                                            direction=params["direction"])
+
+        return transform
+    
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+
+        out[target] = transform(img)[target]
+
+        return out
+    
+    def apply_kpts(self, kpts, transform, target, img_size):
+
+        return kpts
+    
+    def apply_bbx(self, bbx, transform, target):
+
+        return bbx
+
+# --------------------------------------
+#             Not used
+# --------------------------------------
+
+
+class RandomHorizontalFlip(AugmentationBase):
+    """
+        Applies a random horizontal flip to a batch of tensor images with a given probability.
+    """
+
+    def __init__(self, p=0.2):
+        super(RandomHorizontalFlip, self).__init__(p=p)
+
+    def generator(self, batch_size, img_size, device, dtype):
+
+        target = self._adapted_sampling(batch_size, device, dtype)
+
+        # params
+        params = dict()
+        params["target"] = target
+        return params
+
+
+    def get_transform(self, params):
+        return None
+
+    def apply_img(self, img, transform, target):
+
+        out = img.clone()
+
+        out[target] = hflip(img)[target]
+        
         return out
 
 
+class RandomVerticalFlip(AugmentationBase):
+
+    r"""Applies a random vertical flip to a tensor image or a batch of tensor images with a given probability.
+    """
+    def __init__(self, p=0.2):
+        super(RandomVerticalFlip, self).__init__(p=p)
+
+    def generator(self, batch_size, img_size, device, dtype):
+        target = self._adapted_sampling(batch_size, device, dtype)
+
+        # params
+        params = dict()
+        params["target"] = target
+        return params
+
+    def apply(self, inp, params):
+        out = inp.clone()
+        target = params["target"]
+        out[target] = vflip(inp)[target]
+        return out
 
 
 

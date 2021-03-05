@@ -39,11 +39,14 @@ class MegaDepthDataset(data.Dataset):
         self.imgs_desc = self.load_img_cams()
 
         # read images pairs from all scenes with max pairs per scenes
-        self.images = self.load_img_pairs(max_per_scene=varargs["max_per_scene"])
+        self._images = self.load_img_pairs(max_per_scene=varargs["max_per_scene"])
 
-        self.img_1s, self.img_2s = self.images
+        self.img_1s, self.img_2s = self._images
 
         assert len(self.img_1s) == len(self.img_2s)
+        
+        #for sampler
+        self.images = self.img_1s
 
         self.num_kpt = varargs["num_kpt"]
         self.kpt_type = varargs["kpt_type"]
@@ -232,7 +235,6 @@ class MegaDepthDataset(data.Dataset):
         # Load images
         out["img1"] = self._load_img(desc_1.img_path)
         out["img2"] = self._load_img(desc_2.img_path)
-       
 
         # Get intrinsics 
         out["intrinsics1"] = self.get_intrinsics(desc_1)

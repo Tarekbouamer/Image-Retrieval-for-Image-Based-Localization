@@ -1,7 +1,12 @@
 import torch
 from math import sqrt
 
-from ..geometry.transform.affwarp import rotate, rotate3d
+from ..geometry.transform.affwarp import (
+    _compute_tensor_center,
+    _compute_rotation_matrix, 
+    rotate, 
+    rotate3d
+    )
 from cirtorch.utils.helper import _extract_device_dtype
 
 
@@ -586,12 +591,8 @@ def get_motion_kernel2d(kernel_size, angle, direction=0., mode='nearest'):
         angle if isinstance(angle, torch.Tensor) else None,
         direction if isinstance(direction, torch.Tensor) else None,
     ])
-
-    if not isinstance(kernel_size, int) or kernel_size % 2 == 0 or kernel_size < 3:
+    if not isinstance(any(kernel_size), int) or any(kernel_size % 2 == 0) or any(kernel_size < 3):
         raise TypeError("ksize must be an odd integer >= than 3")
-
-    if not isinstance(angle, torch.Tensor):
-        angle = torch.tensor([angle], device=device, dtype=dtype)
 
     if angle.dim() == 0:
         angle = angle.unsqueeze(0)
@@ -623,8 +624,22 @@ def get_motion_kernel2d(kernel_size, angle, direction=0., mode='nearest'):
 
     kernel = kernel.unsqueeze(1)
 
+    
+    # get rotation matrix
+    size = kernel.shape[-2:]
+    batch_size = kernel.shape[0]
+
+
+    center = _compute_tensor_center(size, device=device, dtype=dtype)
+    center = center.expand(batch_size, -1)
+
+    angle = angle.expand(batch_size)
+
+    transform = _compute_rotation_matrix(angle=angle, center=center)
+
     # rotate (counterclockwise) kernel by given angle
-    kernel = rotate(kernel, angle, mode=mode, align_corners=True)
+    kernel = rotate(kernel, transform, mode=mode, align_corners=True)
+
     kernel = kernel[:, 0]
     kernel = kernel / kernel.sum(dim=(1, 2), keepdim=True)
 

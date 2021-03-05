@@ -58,7 +58,7 @@ def warp_perspective(src, M, dsize, mode='bilinear', border_mode='zeros', align_
     return transform_warp_impl(src, M, (h, w), dsize, mode, border_mode, align_corners)
 
 
-def warp_affine(src, M, dsize, mode='bilinear', padding_mode='zeros', align_corners=False):
+def warp_affine(src, M, dest_size, mode='bilinear', padding_mode='zeros', align_corners=False):
     """
         Applies an affine transformation to a tensor.
         The function warp_affine transforms the source tensor using the specified matrix:
@@ -73,18 +73,15 @@ def warp_affine(src, M, dsize, mode='bilinear', padding_mode='zeros', align_corn
                          .format(M.shape))
 
     B, C, H, W = src.size()
-    dsize_src = (H, W)
-    out_size = dsize
+    src_size = (H, W)
 
-    # we generate a 3x3 transformation matrix from 2x3 affine
-    M_3x3 = convert_affinematrix_to_homography(M)
 
-    dst_norm_trans_src_norm = normalize_homography(M_3x3, dsize_src, out_size)
+    dst_norm_trans_src_norm = normalize_homography(M, src_size, dest_size)
 
     src_norm_trans_dst_norm = torch.inverse(dst_norm_trans_src_norm)
 
     grid = F.affine_grid(src_norm_trans_dst_norm[:, :2, :],
-                         [B, C, out_size[0], out_size[1]],
+                         [B, C, dest_size[0], dest_size[1]],
                          align_corners=align_corners)
 
     return F.grid_sample(src, grid,
@@ -139,7 +136,7 @@ def get_perspective_transform(src, dst):
     return M.view(-1, 3, 3)  # Bx3x3
 
 
-def _build_perspective_param(p: torch.Tensor, q: torch.Tensor, axis: str) -> torch.Tensor:
+def _build_perspective_param(p, q, axis):
     ones = torch.ones_like(p)[..., 0:1]
     zeros = torch.zeros_like(p)[..., 0:1]
 
@@ -157,12 +154,13 @@ def _build_perspective_param(p: torch.Tensor, q: torch.Tensor, axis: str) -> tor
     raise NotImplementedError(f"perspective params for axis `{axis}` is not implemented.")
 
 
-def angle_to_rotation_matrix(angle: torch.Tensor) -> torch.Tensor:
+def angle_to_rotation_matrix(angle):
     """
         Create a rotation matrix out of angles in degrees.
 
     """
     ang_rad = deg2rad(angle)
+    
     cos_a = torch.cos(ang_rad)
     sin_a = torch.sin(ang_rad)
 
@@ -212,6 +210,7 @@ def get_rotation_matrix2d(center, angle, scale):
     one = torch.tensor(1., device=center.device, dtype=center.dtype)
 
     M = torch.zeros(batch_size, 2, 3, device=center.device, dtype=center.dtype)
+    
     M[..., 0:2, 0:2] = scaled_rotation
     M[..., 0, 2] = (one - alpha) * x - beta * y
     M[..., 1, 2] = beta * x + (one - alpha) * y

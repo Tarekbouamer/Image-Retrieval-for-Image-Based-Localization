@@ -71,6 +71,7 @@ setup(
         
         "cirtorch.utils",
         "cirtorch.utils.parallel",
+        "cirtorch.utils.evaluation",
     ],
     include_package_data=True,
 )

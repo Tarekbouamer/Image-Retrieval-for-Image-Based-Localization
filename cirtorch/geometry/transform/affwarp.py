@@ -5,6 +5,8 @@ from .projwarp import warp_affine3d, get_projective_transform
 
 from cirtorch.utils.helper import _extract_device_dtype
 
+from ..conversions import convert_affinematrix_to_homography
+
 __all__ = [
     "affine",
     "scale",
@@ -19,18 +21,17 @@ __all__ = [
 # TODO: move functions that starts with _ to mose tensor operations
 
 
-def _compute_tensor_center(tensor):
+def _compute_tensor_center(size, device, dtype):
     """
         Computes the center of tensor plane for (H, W), (C, H, W) and (B, C, H, W).
     """
 
-    assert 2 <= len(tensor.shape) <= 4, f"Must be a 3D tensor as HW, CHW and BCHW. Got {tensor.shape}."
-    height, width = tensor.shape[-2:]
+    height, width = size
 
     center_x = float(width - 1) / 2
     center_y = float(height - 1) / 2
 
-    center = torch.tensor([center_x, center_y], device=tensor.device, dtype=tensor.dtype)
+    center = torch.tensor([center_x, center_y], device=device, dtype=dtype)
 
     return center
 
@@ -58,7 +59,12 @@ def _compute_rotation_matrix(angle, center):
     """
 
     scale = torch.ones_like(center)
+    
     matrix = get_rotation_matrix2d(center, angle, scale)
+
+    # pad transform to get Bx3x3
+    matrix = convert_affinematrix_to_homography(matrix)
+
     return matrix
 
 
@@ -143,6 +149,7 @@ def affine(tensor, matrix, mode='bilinear', align_corners=False):
 
     # we enforce broadcasting since by default grid_sample it does not
     # give support for that
+
     matrix = matrix.expand(tensor.shape[0], -1, -1)
 
     # warp the input tensor
@@ -193,31 +200,17 @@ def affine3d(tensor, matrix, mode='bilinear', align_corners=False):
 
 # https://github.com/anibali/tvl/blob/master/src/tvl/transforms.py#L185
 
-def rotate(tensor, angle, center=None, mode='bilinear', align_corners=False):
+
+def rotate(tensor, M_rot, mode='bilinear', align_corners=False):
     """
         Rotate the image anti-clockwise about the centre.
     """
-
-    if center is not None and not torch.is_tensor(center):
-        raise TypeError("Input center type is not a torch.Tensor. Got {}"
-                        .format(type(center)))
-
     if len(tensor.shape) not in (3, 4,):
         raise ValueError("Invalid tensor shape, we expect CxHxW or BxCxHxW. "
                          "Got: {}".format(tensor.shape))
-
-    # compute the rotation center
-    if center is None:
-        center = _compute_tensor_center(tensor)
-
-    # compute the rotation matrix
-    angle = angle.expand(tensor.shape[0])
-    center = center.expand(tensor.shape[0], -1)
-
-    rotation_matrix = _compute_rotation_matrix(angle, center)
-
+    
     # warp using the affine transform
-    return affine(tensor, rotation_matrix[..., :2, :3], mode, align_corners)
+    return affine(tensor, M_rot , mode, align_corners)
 
 
 def rotate3d(tensor, yaw, pitch, roll, center=None, mode='bilinear', align_corners=False):

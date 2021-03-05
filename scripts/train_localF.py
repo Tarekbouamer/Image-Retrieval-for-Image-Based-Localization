@@ -24,7 +24,8 @@ from cirtorch.backbones.url import model_urls, model_urls_cvut
 from cirtorch.backbones.util import load_state_dict_from_url, init_weights
 
 # dataset
-from cirtorch.datasets.localFeatures import MegaDepthDataset, ISSTransform, DistributedARBatchSampler, iss_collate_fn
+from cirtorch.datasets.localFeatures import MegaDepthDataset, ISSTransform, DistributedARBatchSampler, hpatches, iss_collate_fn
+from cirtorch.datasets.localFeatures import HPacthes, ISSTestTransform, HP_INPUTS
 
 # data augmentation
 from cirtorch.datasets.augmentation import RandomAugmentation
@@ -38,20 +39,21 @@ from cirtorch.modules.heads.local_head import localHead
 from cirtorch.algos.LF_algo import localFeatureLoss, localFeatureAlgo
 
 # models
-from cirtorch.models.LF_net import localNet, NETWORK_INPUTS
+from cirtorch.models.LF_net import localNet, NETWORK_TRAIN_INPUTS
 
 # utils
 from cirtorch.utils.download import download_train, download_test
 from cirtorch.utils.misc import config_to_string, scheduler_from_config, norm_act_from_config, freeze_params, \
     all_reduce_losses, NORM_LAYERS, OTHER_LAYERS
 
-from cirtorch.utils.evaluate import compute_map_and_print
 from cirtorch.utils.general import htime
 from cirtorch.utils.options import test_datasets_names
 from cirtorch.utils import logging
 from cirtorch.utils.snapshot import save_snapshot, resume_from_snapshot, pre_train_from_snapshots
 from cirtorch.utils.meters import AverageMeter
 from cirtorch.utils.parallel import DistributedDataParallel, PackedSequence
+
+from cirtorch.utils.evaluation.HPatchesEval import run_descriptor_evaluation
 
 LAYERS = NORM_LAYERS + OTHER_LAYERS
 
@@ -113,17 +115,16 @@ def make_dir(config, directory):
     if config["fpn"].getboolean("fpn"):
         extension += "_FPN"
 
-    extension += "_{}_m{:.2f}".format(config["local"].get("loss"),
-                                      config["local"].getfloat("loss_margin"))
-
-    extension += "_{}_{}".format(config["local"].getstruct("pooling")["name"],
-                                 config["local"].getstruct("normal")["name"])
+    extension += "_{}_gamma{:.2f}_em{:.2f}_cm{:.2f}".format(config["local"].get("loss"),
+                                                config["local"].getfloat("gamma"),
+                                                config["local"].getfloat("epipolar_margin"),
+                                                config["local"].getfloat("cyclic_margin"))
 
     extension += "_{}_lr{:.1e}_wd{:.1e}".format(config["optimizer"].get("type"),
                                                 config["optimizer"].getfloat("lr"),
                                                 config["optimizer"].getfloat("weight_decay"))
 
-    extension += "_nnum{}".format(config["dataloader"].getint("neg_num"))
+    extension += "_max_num{}".format(config["dataloader"].getint("max_per_scene"))
     extension += "_bsize{}_uevery{}_imsize{}".format(config["dataloader"].getint("train_batch_size"),
                                                      config["dataloader"].getint("update_every"),
                                                      config["dataloader"].getint("train_longest_max_size"))
@@ -150,13 +151,6 @@ def make_config(args):
 def make_dataloader(args, config, rank=None, world_size=None):
     general_config = config["general"]
     data_config = config["dataloader"]
-
-    # Manually check if there are unknown test datasets
-    for dataset in data_config.getstruct("test_datasets"):
-        if dataset not in test_datasets_names:
-            raise ValueError('Unsupported or unknown test dataset: {}!'.format(dataset))
-
-    # Check if test datasets are available, download it if  not !
 
     # Data Loader
     log_debug("Creating dataloaders for dataset in %s", args.data)
@@ -212,7 +206,7 @@ def make_dataloader(args, config, rank=None, world_size=None):
                                             rank=rank,
                                             drop_last=True)
 
-    val_dl = data.DataLoader(val_sampler,
+    val_dl = data.DataLoader(val_db,
                              batch_sampler=val_sampler,
                              collate_fn=iss_collate_fn,
                              pin_memory=True,
@@ -223,15 +217,12 @@ def make_dataloader(args, config, rank=None, world_size=None):
 
 
 def make_model(args, config):
+    
     # parse params with default values
-
     body_config = config["body"]
     fpn_config = config["fpn"]
-    ir_config = config["local"]
+    local_config = config["local"]
     data_config = config["dataloader"]
-
-    # get output dimensionality size
-    net_modules = []
 
     # BN + activation
     norm_act_static, norm_act_dynamic = norm_act_from_config(body_config)
@@ -242,8 +233,6 @@ def make_model(args, config):
     body_fn = models.__dict__[body_config.get("arch")]
     body_params = body_config.getstruct("body_params") if body_config.get("body_params") else {}
     body = body_fn(norm_act=norm_act_static, config=body_config, **body_params)
-
-    net_modules.append("body")
 
     if body_config.getboolean("pretrained"):
         arch = body_config.get("arch")
@@ -287,7 +276,7 @@ def make_model(args, config):
 
         # Freeze modules in backbone
         for n, m in body.named_modules():
-            for mod_id in range(1, body_config.getint("num_frozen") + 1):
+            for mod_id in body_config.getstruct("num_frozen"):
                 if ("mod%d" % mod_id) in n:
                     freeze_params(m)
 
@@ -297,11 +286,11 @@ def make_model(args, config):
 
     # Feature pyramids
     if fpn_config.getboolean("fpn"):
+        
         # Create FPN
         body_channels = body_config.getstruct("out_channels")
 
         fpn_inputs = fpn_config.getstruct("inputs")
-        fpn_outputs = fpn_config.getstruct("outputs")
 
         fpn = FPN([body_channels[inp] for inp in fpn_inputs],
                   fpn_config.getint("out_channels"),
@@ -314,10 +303,32 @@ def make_model(args, config):
         output_dim = fpn_config.getint("out_channels")
     else:
         output_dim = OUTPUT_DIM[body_config.get("arch")]
+
+
+    # Create Local features
+    local_loss = localFeatureLoss(name=local_config.get("loss"),
+                                  gamma=local_config.getfloat("gamma"),
+                                  epipolar_margin=local_config.getfloat("epipolar_margin"),
+                                  cyclic_margin=local_config.getfloat("cyclic_margin"))
+
+    local_algo = localFeatureAlgo(loss=local_loss,
+                                  min_level=local_config.getint("fpn_min_level"),
+                                  fpn_levels=local_config.getint("fpn_levels"))
+
+    local_head = localHead(dim=output_dim,
+                           embedding_size=local_config.getint("embedding_size"))
     
-    #TODO: add local feature head , loss, and algo plus return model
+    if local_config.getint("embedding_size"):
+        output_dim = local_config.getint("embedding_size")
     
-    return body, net_modules, output_dim
+    # Data augmentation
+    augment = RandomAugmentation(rgb_mean=data_config.getstruct("rgb_mean"),
+                                 rgb_std=data_config.getstruct("rgb_std"))
+
+    # Create a generic Local features network
+    net = localNet(body, local_algo, local_head, augment=augment)
+
+    return net, output_dim
 
 
 def make_optimizer(model, config, epoch_length):
@@ -337,13 +348,16 @@ def make_optimizer(model, config, epoch_length):
 
     # Separate classifier parameters from all others
     net_params = []
-    ret_head_params = []
+    local_head_params = []
+    
     for k, v in model.named_parameters():
-        if k.find("pool") != -1:
-            ret_head_params.append(v)
+        if k.find("local_head") != -1:
+            if v.requires_grad:
+                local_head_params.append(v)
         else:
             if v.requires_grad:
                 net_params.append(v)
+
     # Set-up optimizer hyper-parameters
     parameters = [
         {
@@ -352,9 +366,9 @@ def make_optimizer(model, config, epoch_length):
             "weight_decay": WEIGHT_DECAY
         },
         {
-            "params": ret_head_params,
-            "lr": LR * lr_coefs["ret_head"],
-            "weight_decay": WEIGHT_DECAY * weight_decay_coefs["ret_head"]
+            "params": local_head_params,
+            "lr": LR * lr_coefs["local_head"],
+            "weight_decay": WEIGHT_DECAY * weight_decay_coefs["local_head"]
         }
     ]
 
@@ -378,34 +392,6 @@ def make_optimizer(model, config, epoch_length):
     return optimizer, scheduler, parameters, batch_update, total_epochs
 
 
-def set_batchnorm_eval(m):
-    classname = m.__class__.__name__
-    if classname.find('BatchNorm') != -1:
-        # freeze running mean and std:
-        # we do training one image at a time
-        # so the statistics would not be per batch
-        # hence we choose freezing (ie using imagenet statistics)
-        m.eval()
-        # # freeze parameters:
-        # # in fact no need to freeze scale and bias
-        # # they can be learned
-        # # that is why next two lines are commented
-        # for p in m.parameters():
-        # p.requires_grad = False
-
-
-def visualize(config, dataloader):
-    
-    for it, batch in enumerate(dataloader):
-        print(batch["img1"][0].shape)
-        print(batch["intrinsics1"][0])
-        print(batch["extrinsics1"][0])
-        print(batch["img1_size"][0])
-        print(batch["img1_path"][0])
-
-        input()
-
-
 def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
 
     # Create tuples for training
@@ -425,7 +411,7 @@ def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
 
     for it, batch in enumerate(dataloader):
         #Upload batch
-        batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in NETWORK_INPUTS}
+        batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in NETWORK_TRAIN_INPUTS}
 
         # Measure data loading time
         data_time_meter.update(torch.tensor(time.time() - data_time))
@@ -439,6 +425,7 @@ def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
 
         # Run network
         losses, _ = model(**batch, do_loss=True, do_augmentaton=True)
+        
         distributed.barrier()
 
         losses = OrderedDict((k, v.mean()) for k, v in losses.items())
@@ -449,9 +436,6 @@ def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
         optimizer.step()
         optimizer.zero_grad()
 
-        if (it + 1) % 5 == 0:
-            optimizer.step()
-            optimizer.zero_grad()
 
         # Gather from all workers
         losses = all_reduce_losses(losses)
@@ -474,9 +458,9 @@ def train(model, config, dataloader, optimizer, scheduler, meters, **varargs):
                 it + 1, len(dataloader),
                 OrderedDict([
                     ("lr_body", scheduler.get_lr()[0] * 1e6),
-                    ("lr_ret", scheduler.get_lr()[1] * 1e6),
+                    ("lr_local", scheduler.get_lr()[1] * 1e6),
                     ("loss", meters["loss"]),
-                    ("ret_loss", meters["ret_loss"]),
+                    ("local_loss", meters["local_loss"]),
                     ("data_time", data_time_meter),
                     ("batch_time", batch_time_meter)
                 ])
@@ -491,16 +475,6 @@ def validate(model, config, dataloader, **varargs):
 
     # create tuples for validation
     data_config = config["dataloader"]
-
-    distributed.barrier()
-
-    avg_neg_distance = dataloader.dataset.create_epoch_tuples(model, log_info, log_debug,
-                                                              output_dim=varargs["output_dim"],
-                                                              world_size=varargs["world_size"],
-                                                              rank=varargs["rank"],
-                                                              device=varargs["device"],
-                                                              data_config=data_config)
-    distributed.barrier()
 
     # Switch to eval mode
     model.eval()
@@ -517,19 +491,15 @@ def validate(model, config, dataloader, **varargs):
     for it, batch in enumerate(dataloader):
         with torch.no_grad():
 
-            # Upload batch
-            for k in NETWORK_INPUTS:
-                if isinstance(batch[k][0], PackedSequence):
-                    batch[k] = [item.cuda(device=varargs["device"], non_blocking=True) for item in batch[k]]
-                else:
-                    batch[k] = batch[k].cuda(device=varargs["device"], non_blocking=True)
+            #Upload batch
+            batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in NETWORK_TRAIN_INPUTS}
 
             data_time_meter.update(torch.tensor(time.time() - data_time))
 
             batch_time = time.time()
 
             # Run network
-            losses, _ = model(**batch, do_loss=True, do_prediction=True)
+            losses, _ = model(**batch, do_loss=True, do_prediction=True, do_augmentation=True)
 
             losses = OrderedDict((k, v.mean()) for k, v in losses.items())
             losses = all_reduce_losses(losses)
@@ -550,8 +520,8 @@ def validate(model, config, dataloader, **varargs):
                 OrderedDict([
                     ("loss", loss_meter),
                     ("data_time", data_time_meter),
-                    ("batch_time", batch_time_meter)
-                ])
+                    ("batch_time", batch_time_meter)]
+                    )
             )
 
         data_time = time.time()
@@ -561,7 +531,112 @@ def validate(model, config, dataloader, **varargs):
 
 def test(args, config, model, rank=None, world_size=None, **varargs):
 
-    return 0
+    log_debug('Evaluating network on test datasets...')
+
+    # Eval mode
+    model.eval()
+    data_config = config["dataloader"]
+
+    # Average score
+    avg_score = 0.0
+
+    # Evaluate on test datasets
+    list_datasets = data_config.getstruct("test_datasets")
+
+    for dataset in list_datasets:
+
+        start = time.time()
+        Avg_F_score = 0.
+        
+        log_debug('{%s}: Loading Dataset', dataset)
+
+        for split in {"i", "v"}:
+
+            test_tf = ISSTestTransform(shortest_size=data_config.getint("test_shortest_size"),
+                                        longest_max_size=data_config.getint("test_longest_max_size"))
+
+            test_db = HPacthes(root_dir=args.data,
+                            name=dataset,
+                            split=split,
+                            transform=test_tf,
+                            num_kpt=data_config.getint("num_kpt"),
+                            kpt_type=data_config.get("kpt_type"),
+                            prune_kpt=data_config.getboolean("prune_kpt"))
+
+            test_sampler = DistributedARBatchSampler(data_source=test_db,
+                                                    batch_size=data_config.getint("test_batch_size"),
+                                                    num_replicas=world_size,
+                                                    rank=rank,
+                                                    drop_last=True,
+                                                    shuffle=False)
+
+            test_dl = torch.utils.data.DataLoader(test_db,
+                                                batch_sampler=test_sampler,
+                                                collate_fn=iss_collate_fn,
+                                                pin_memory=True,
+                                                num_workers=data_config.getstruct("num_workers"),
+                                                shuffle=False)
+            
+            log_debug('{%s}: Feature Extraction %s...', dataset, split)
+
+            for it, batch in tqdm(enumerate(test_dl), total=len(test_dl)):
+                with torch.no_grad():
+                    
+                    # Upload batch
+                    img1_path, img2_path = batch["img1_path"][0], batch["img2_path"][0]
+
+                    batch = {k: batch[k].cuda(device=varargs["device"], non_blocking=True) for k in HP_INPUTS}
+
+                    # Run Image 1
+                    _, pred1 = model(img=batch["img1"], kpts=batch["kpts1"], do_prediction=True, do_augmentaton=True)
+                    distributed.barrier()
+
+                    kpts1, _ = batch["kpts1"].contiguous
+                    pred1, _ = pred1["local_pred"].contiguous
+
+                    with open(img1_path + ".npz", 'wb') as output_file:
+                        np.savez(output_file, 
+                                keypoints=kpts1.squeeze(0).cpu().numpy(),
+                                descriptors=pred1.squeeze(0).cpu().numpy())
+
+                    # Run Image 2
+                    _, pred2 = model(img=batch["img2"], kpts=batch["kpts2"], do_prediction=True, do_augmentaton=True)
+                    distributed.barrier()
+
+                    kpts2, _ = batch["kpts2"].contiguous
+                    pred2, _ = pred2["local_pred"].contiguous
+
+                    with open(img2_path + ".npz", 'wb') as output_file:
+                        np.savez(output_file, 
+                                keypoints=kpts2.squeeze(0).cpu().numpy(),
+                                descriptors=pred2.squeeze(0).cpu().numpy())
+
+            log_debug('{%s}: Run Evalution %s...', dataset, split)
+
+            # run evaluation
+            config = {'num_kp': 1000,   
+                    'correctness_threshold': 3, 
+                    'max_mma_threshold': 10}
+
+            H_estimation, Precision, Recall, MMA= run_descriptor_evaluation (config, test_dl ) 
+            
+            # compute F score 
+            F_score = 2*((Precision * Recall)/(Precision + Recall))
+            
+            Avg_F_score += 0.5 * F_score
+            
+            np.set_printoptions(precision=3)
+
+            log_info('{%s}: H_estimation_%s = %s', dataset , split, format(H_estimation, '.3f') )
+            log_info('{%s}: Precision_%s    = %s', dataset , split, format(Precision, '.3f')    )
+            log_info('{%s}: Recall_%s       = %s', dataset , split, format(Recall, '.3f')       )
+            log_info('{%s}: MMA_%s          = %s', dataset , split, MMA                         )
+            log_info('{%s}: F_score_%s      = %s', dataset , split, format(F_score, '.3f')      )
+
+        log_info('{%s}: Running time     = %s', dataset , htime(time.time()-start)   )
+        log_info('{%s}: Avg_F_score      = %s', dataset , format(Avg_F_score, '.3f') )
+
+    return Avg_F_score
 
 
 def save_checkpoint(state, is_best, directory):
@@ -606,19 +681,19 @@ def main(args):
         log_debug("Initialize model to train from scratch %s". body_config.get("arch"))
 
     # Load model
-    model, _, output_dim = make_model(args, config)
+    model, output_dim = make_model(args, config)
 
     # Resume / Pre_Train
     if args.resume:
         assert not args.pre_train, "resume and pre_train are mutually exclusive"
         log_debug("Loading snapshot from %s", args.resume)
-        snapshot = resume_from_snapshot(model, args.resume, ["body", "ret_head"])
+        snapshot = resume_from_snapshot(model, args.resume, ["body", "local_head"])
     elif args.pre_train:
         assert not args.resume, "resume and pre_train are mutually exclusive"
         log_debug("Loading pre-trained model from %s", args.pre_train)
-        pre_train_from_snapshots(model, args.pre_train, ["body", "ret_head"])
+        pre_train_from_snapshots(model, args.pre_train, ["body", "local_head"])
     else:
-        assert not args.eval, "--resume is needed in eval mode"
+        #assert not args.eval, "--resume is needed in eval mode"
         snapshot = None
 
     # Init GPU stuff
@@ -635,7 +710,7 @@ def main(args):
     momentum = 1. - 1. / len(train_dataloader)
     meters = {
         "loss": AverageMeter((), momentum),
-        "ret_loss": AverageMeter((), momentum)
+        "local_loss": AverageMeter((), momentum)
     }
 
     if args.resume:
@@ -665,8 +740,7 @@ def main(args):
         log_info("Evaluation Done ..... ")
 
         exit(0)
-    scheduler_config = config["scheduler"]
-
+    
     for epoch in range(start_epoch, total_epochs):
 
         log_info("Starting epoch %d", epoch + 1)
@@ -675,10 +749,6 @@ def main(args):
             scheduler.step(epoch)
 
         score = {}
-        # TODO: Remove Debug lines
-        
-        #visualize(config, train_dataloader)
-        #pass
         
         # Run training
         global_step = train(model, config, train_dataloader, optimizer, scheduler, meters,
@@ -704,7 +774,7 @@ def main(args):
 
             save_snapshot(snapshot_file, config, epoch, 0, best_score, global_step,
                           body=model.module.body.state_dict(),
-                          ret_head=model.module.ret_head.state_dict(),
+                          local_head=model.module.local_head.state_dict(),
                           optimizer=optimizer.state_dict(),
                           **meters_out_dict)
 

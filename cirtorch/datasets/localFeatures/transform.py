@@ -6,6 +6,7 @@ from PIL import Image
 from torchvision.transforms import functional as tfn
 
 from cirtorch.geometry.epipolar.projection import scale_intrinsics
+
 class ISSTransform:
 
     def __init__(self, shortest_size=None, longest_max_size=None, random_flip=False, random_scale=None):
@@ -36,6 +37,9 @@ class ISSTransform:
 
         return int(target_size)
 
+    def _adjust_points(self, kpts, scale):
+        return (kpts * scale).astype(int)
+
     def __call__(self, inp):
 
         # Adjust scale, possibly at random
@@ -46,7 +50,7 @@ class ISSTransform:
 
         scale_1 = self._adjusted_scale(inp["img1"].size[0], inp["img1"].size[1], target_size)
         scale_2 = self._adjusted_scale(inp["img2"].size[0], inp["img2"].size[1], target_size)
-
+        
         out_size_1 = tuple(int(dim * scale_1) for dim in inp["img1"].size)
         out_size_2 = tuple(int(dim * scale_2) for dim in inp["img2"].size)
 
@@ -58,19 +62,20 @@ class ISSTransform:
         inp["img2"] = tfn.to_tensor(img_2)
 
         # Transform intrinsics to tensor
-        inp["intrinsics1"] = torch.from_numpy(inp["intrinsics1"].astype(np.float))
-        inp["intrinsics2"] = torch.from_numpy(inp["intrinsics2"].astype(np.float))
+        inp["intrinsics1"] = torch.from_numpy(inp["intrinsics1"]).float()
+        inp["intrinsics2"] = torch.from_numpy(inp["intrinsics2"]).float()
         
         # Scale intrinsics
-        inp["intrinsics1"] = scale_intrinsics(inp["intrinsics1"], scale_1)
-        inp["intrinsics2"] = scale_intrinsics(inp["intrinsics2"], scale_2)
+        inp["intrinsics1"] = scale_intrinsics(inp["intrinsics1"], scale_1).unsqueeze(0)
+        inp["intrinsics2"] = scale_intrinsics(inp["intrinsics2"], scale_2).unsqueeze(0)
 
         # Transform extrinsics to tensor
-        inp["extrinsics1"] = torch.from_numpy(inp["extrinsics1"].astype(np.float))
-        inp["extrinsics2"] = torch.from_numpy(inp["extrinsics2"].astype(np.float))
+        inp["extrinsics1"] = torch.from_numpy(inp["extrinsics1"]).float().unsqueeze(0)
+        inp["extrinsics2"] = torch.from_numpy(inp["extrinsics2"]).float().unsqueeze(0)
 
-        # Transform keypoints to tensor
-        inp["kpts"] = torch.from_numpy(inp["kpts"].astype(np.float))
+        # Scale and Transform keypoints to tensor
+        scaled_kpts = self._adjust_points(inp["kpts"], scale_1)
+        inp["kpts"] = torch.from_numpy(scaled_kpts).float().unsqueeze(0)
 
         return inp
 
@@ -78,44 +83,57 @@ class ISSTransform:
 class ISSTestTransform:
     def __init__(self,
                  shortest_size=None,
-                 longest_max_size=None,
-                 random_scale=None):
+                 longest_max_size=None):
 
         self.shortest_size = shortest_size
         self.longest_max_size = longest_max_size
-        self.random_scale = random_scale
 
     def _adjusted_scale(self, in_width, in_height):
         min_size = min(in_width, in_height)
-        max_size = max(in_width, in_height)
-
-        window = self.shortest_size * self.random_scale
-        scale = 1.0
-
-        # resize to mean size if out of window
-        if int(min_size) > window[1] or int(min_size) < window[0]:
-            scale = self.shortest_size / min_size
-
-        # resize to max if longer
-        if int(max_size * scale) > self.longest_max_size:
-            scale = self.longest_max_size / max_size
-
+        scale = self.shortest_size / min_size
         return scale
 
-    def __call__(self, img, bbx=None):
+    def _adjust_points(self, kpts, scale):
+        return (kpts * scale).astype(int)
 
-        # Crop  bbx
-        if bbx is not None:
-            img = img.crop(box=bbx)
+    def _adjust_homography(self, H, scale1, scale2):
 
-        if self.shortest_size:
+        # Get the scaling matrices
+        scale1_matrix = np.diag([1. / scale1, 1. / scale1, 1.]).astype(float)
+        scale2_matrix = np.diag([1. / scale2, 1. / scale2, 1.]).astype(float)
+        
+        H = scale2_matrix @ H @ np.linalg.inv(scale1_matrix)
+        H_inv = np.linalg.inv(H)
+        
+        return H, H_inv
 
-            scale = self._adjusted_scale(img.size[0], img.size[1])
+    def __call__(self, out):
 
-            out_size = tuple(int(dim * scale) for dim in img.size)
-            img = img.resize(out_size, resample=Image.BILINEAR)
+        # Adjust scale
+        scale1 = self._adjusted_scale(out["img1"].size[0], out["img1"].size[1])
+        scale2 = self._adjusted_scale(out["img2"].size[0], out["img2"].size[1])
+
+        out_size = tuple(int(dim * scale1) for dim in out["img1"].size)
+        out["img1"] = out["img1"].resize(out_size, resample=Image.BILINEAR)
+
+        out_size = tuple(int(dim * scale2) for dim in out["img2"].size)
+        out["img2"] = out["img2"].resize(out_size, resample=Image.BILINEAR)
+
+        # Scale keypoints
+        out["kpts1"] = self._adjust_points(out["kpts1"], scale1)
+        out["kpts2"] = self._adjust_points(out["kpts2"], scale2)
+
+        # Scale homographies
+        out["H"], out["H_inv"] = self._adjust_homography(out["H"], scale1, scale2)
 
         # Image transformations
-        img = tfn.to_tensor(img)
+        out["img1"] = tfn.to_tensor(out["img1"])
+        out["img2"] = tfn.to_tensor(out["img2"])
 
-        return dict(img=img)
+        out["kpts1"]  = torch.from_numpy(out["kpts1"] ).float().unsqueeze(0)
+        out["kpts2"]  = torch.from_numpy(out["kpts2"] ).float().unsqueeze(0)
+
+        out["H"]  = torch.from_numpy(out["H"] ).float().unsqueeze(0)
+        out["H_inv"]  = torch.from_numpy(out["H_inv"] ).float().unsqueeze(0)
+
+        return out
